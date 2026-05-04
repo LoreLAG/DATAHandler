@@ -1,23 +1,30 @@
-import fitz
-import pdfplumber
-import re
+import collections
 import os
+import sys
+import logging
+import re
 import time
 import threading
-import sqlite3
-import json
-from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor, as_completed
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk, scrolledtext, simpledialog
+from tkinter import filedialog, messagebox, scrolledtext, ttk, simpledialog
+from pathlib import Path
+from typing import Optional
+from PyPDF2 import PdfReader
+from datetime import datetime
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing
 import ctypes
 
-# ── COSTANTI GRAFICHE ────────────────────────────────────────────────────────
+import fitz  # PyMuPDF
+import pdfplumber
+import sqlite3
+import json
+
+# ── GRAPHICAL CONSTANTS ──────────────────────────────────────────────────────
 CHECKED = "☑"
 UNCHECKED = "☐"
 
-# ── REGEX PER L'ESTRAZIONE DELLE MISURE ──
+# ── REGEX FOR MEASURE EXTRACTION ──
 RE_CALYPSO = re.compile(
     r"^(.+?)[ \t]+(-?\d+[,\.]\d+)[ \t]*mm[ \t]+"
     r"(-?\d+[,\.]\d+)[ \t]+(-?\d+[,\.]\d+)[ \t]+(-?\d+[,\.]\d+)[ \t]+(-?\d+[,\.]\d+)"
@@ -36,14 +43,14 @@ def parse_number(s):
         return None
 
 
-def pulisci_testo(testo):
-    return " ".join(str(testo).split()) if testo else ""
+def clean_text(text):
+    return " ".join(str(text).split()) if text else ""
 
 
-# ── WORKER: ESTRAZIONE MISURE (pdfplumber) ──
-def worker_estrazione_misure(args):
-    """Estrae le misurazioni e applica il tag fase scelto dall'utente (anche vuoto)."""
-    pdf_path_str, codice, lotto, fase = args
+# ── WORKER: MEASURE EXTRACTION (pdfplumber) ──
+def worker_extract_measures(args):
+    """Extracts measurements and applies the phase tag chosen by the user (even empty)."""
+    pdf_path_str, code, batch, phase = args
     pdf_path = Path(pdf_path_str)
 
     try:
@@ -52,7 +59,7 @@ def worker_estrazione_misure(args):
     except Exception as e:
         return {"error": str(e), "file_path": pdf_path_str}
 
-    righe_estratte = []
+    extracted_rows = []
     seen = set()
     current_section = ""
 
@@ -66,46 +73,46 @@ def worker_estrazione_misure(args):
 
         m = RE_CALYPSO.match(line)
         if m:
-            nome = pulisci_testo(m.group(1))
+            name = clean_text(m.group(1))
             meas = parse_number(m.group(2))
             nom = parse_number(m.group(3))
             tp = parse_number(m.group(4))
             tm = parse_number(m.group(5))
             dev = parse_number(m.group(6))
             extra = parse_number(m.group(7)) if len(m.groups()) > 6 else None
-            stato = "OK" if (tm is not None and tp is not None and dev is not None and tm <= dev <= tp) else "NON OK"
+            status = "OK" if (tm is not None and tp is not None and dev is not None and tm <= dev <= tp) else "NON OK"
         else:
             m_angle = RE_ANGLE.match(line)
             if m_angle:
-                nome = pulisci_testo(m_angle.group(1))
+                name = clean_text(m_angle.group(1))
                 meas = parse_number(m_angle.group(2))
                 nom = parse_number(m_angle.group(3))
-                tp = tm = extra = stato = None
+                tp = tm = extra = status = None
                 dev = parse_number(m_angle.group(4))
             else:
                 m_part = RE_PARTIAL.match(line)
                 if m_part:
-                    nome = pulisci_testo(m_part.group(1))
+                    name = clean_text(m_part.group(1))
                     meas = parse_number(m_part.group(2))
-                    nom = tp = tm = dev = extra = stato = None
+                    nom = tp = tm = dev = extra = status = None
                 else:
                     continue
 
-        key = (current_section, nome)
+        key = (current_section, name)
         if key not in seen:
             seen.add(key)
-            tupla_riga = (pdf_path_str, pdf_path.parent.name, codice, lotto, current_section, nome,
-                          meas, nom, tp, tm, dev, extra, stato, fase)
-            righe_estratte.append(tupla_riga)
+            row_tuple = (pdf_path_str, pdf_path.parent.name, code, batch, current_section, name,
+                          meas, nom, tp, tm, dev, extra, status, phase)
+            extracted_rows.append(row_tuple)
 
-    return {"file_path": pdf_path_str, "data": righe_estratte}
+    return {"file_path": pdf_path_str, "data": extracted_rows}
 
 
-# ── INTERFACCIA GRAFICA ──
+# ── GRAPHICAL USER INTERFACE ──
 class UniversalExtractorApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Estrattore Dati MACRO - DB SQLite")
+        self.root.title("MACRO Data Extractor - SQLite DB")
         self.root.geometry("1400x800")
         self.root.minsize(1050, 700)
 
@@ -115,7 +122,7 @@ class UniversalExtractorApp:
             self.root.attributes('-zoomed', True)
 
         self.db_path = tk.StringVar()
-        self.dati_cartelle = {}
+        self.folder_data = {}
         self.last_clicked_item = None
         self.stop_flag = threading.Event()
 
@@ -128,101 +135,99 @@ class UniversalExtractorApp:
         style.configure("Treeview", rowheight=28, font=("Arial", 10))
         style.configure("Treeview.Heading", font=("Arial", 10, "bold"), background="#d5d8dc")
 
-        # --- HEADER (Top Bar Scura) ---
+        # --- HEADER (Dark Top Bar) ---
         frame_header = tk.Frame(self.root, pady=15, padx=20, bg="#1c2833")
         frame_header.pack(fill="x")
 
-        # RIGA 1: Selezione DB
+        # ROW 1: DB Selection
         frame_db_sel = tk.Frame(frame_header, bg="#1c2833")
         frame_db_sel.pack(fill="x", pady=(0, 10))
-        tk.Label(frame_db_sel, text="1. Database SQLite:", font=("Arial", 11, "bold"), bg="#1c2833", fg="white",
-                 width=20,
-                 anchor="w").pack(side="left")
+        tk.Label(frame_db_sel, text="1. SQLite Database:", font=("Arial", 11, "bold"), bg="#1c2833", fg="white",
+                 width=20, anchor="w").pack(side="left")
         tk.Entry(frame_db_sel, textvariable=self.db_path, state="readonly", font=("Arial", 10)).pack(side="left",
                                                                                                      fill="x",
                                                                                                      expand=True,
                                                                                                      padx=(0, 10))
 
-        tk.Button(frame_db_sel, text="➕ Crea Nuovo DB...", command=self.crea_db, bg="#f39c12", fg="white",
+        tk.Button(frame_db_sel, text="➕ Create New DB...", command=self.create_db, bg="#f39c12", fg="white",
                   font=("Arial", 9, "bold"), bd=0, padx=10, pady=4).pack(side="right", padx=(5, 0))
-        tk.Button(frame_db_sel, text="📂 Apri Esistente...", command=self.scegli_db, bg="#3498db", fg="white",
+        tk.Button(frame_db_sel, text="📂 Open Existing...", command=self.choose_db, bg="#3498db", fg="white",
                   font=("Arial", 9, "bold"), bd=0, padx=10, pady=4).pack(side="right")
 
-        # RIGA 2: Selezione Sorgenti
+        # ROW 2: Sources Selection
         frame_dir_sel = tk.Frame(frame_header, bg="#1c2833")
         frame_dir_sel.pack(fill="x")
-        tk.Label(frame_dir_sel, text="2. Sorgenti Dati:", font=("Arial", 11, "bold"), bg="#1c2833", fg="white",
-                 width=20,
-                 anchor="w").pack(side="left")
+        tk.Label(frame_dir_sel, text="2. Data Sources:", font=("Arial", 11, "bold"), bg="#1c2833", fg="white",
+                 width=20, anchor="w").pack(side="left")
 
-        tk.Button(frame_dir_sel, text="Aggiungi Cartella", font=("Arial", 10, "bold"),
+        tk.Button(frame_dir_sel, text="Add Folder", font=("Arial", 10, "bold"),
                   bg="#27ae60", fg="white", bd=0, padx=10, pady=4,
-                  command=self.aggiungi_cartella_singola).pack(side="left", padx=(0, 5))
+                  command=self.add_single_folder).pack(side="left", padx=(0, 5))
 
-        tk.Button(frame_dir_sel, text="Importa Sottocartelle Separate", font=("Arial", 10, "bold"),
+        tk.Button(frame_dir_sel, text="Import Separate Subfolders", font=("Arial", 10, "bold"),
                   bg="#16a085", fg="white", bd=0, padx=10, pady=4,
-                  command=self.aggiungi_macrocartella).pack(side="left")
+                  command=self.add_macrofolder).pack(side="left")
 
-        # --- BODY (Tabella e Controlli) ---
+        # --- BODY (Table and Controls) ---
         paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
         paned.pack(fill="both", expand=True, padx=15, pady=15)
 
-        # SINISTRA: Treeview
-        frame_sx = tk.LabelFrame(paned, text="Elenco Cartelle in Coda (Seleziona per impostare Fase/Lotto)", padx=10,
+        # LEFT: Treeview
+        frame_left = tk.LabelFrame(paned, text="Folders in Queue (Select to set Phase/Batch)", padx=10,
                                  pady=10, bg="#ecf0f1")
-        paned.add(frame_sx, weight=2)
+        paned.add(frame_left, weight=2)
 
-        frame_btn_tree = tk.Frame(frame_sx, bg="#ecf0f1")
+        frame_btn_tree = tk.Frame(frame_left, bg="#ecf0f1")
         frame_btn_tree.pack(fill="x", pady=(0, 8))
-        tk.Button(frame_btn_tree, text="☑ Seleziona Tutto", command=self.seleziona_tutto, bd=0, bg="#bdc3c7", padx=8,
+        tk.Button(frame_btn_tree, text="☑ Select All", command=self.select_all, bd=0, bg="#bdc3c7", padx=8,
                   pady=3).pack(side="left", padx=(0, 5))
-        tk.Button(frame_btn_tree, text="☐ Deseleziona Tutto", command=self.deseleziona_tutto, bd=0, bg="#bdc3c7",
+        tk.Button(frame_btn_tree, text="☐ Deselect All", command=self.deselect_all, bd=0, bg="#bdc3c7",
                   padx=8, pady=3).pack(side="left", padx=(0, 5))
-        tk.Button(frame_btn_tree, text="🗑 Rimuovi", command=self.rimuovi_cartella_selezionata, bd=0, bg="#e74c3c",
+        tk.Button(frame_btn_tree, text="🗑 Remove", command=self.remove_selected_folder, bd=0, bg="#e74c3c",
                   fg="white", padx=8, pady=3).pack(side="left")
 
-        tk.Button(frame_btn_tree, text="✏️ Forza Lotto", bg="#f1c40f", font=("Arial", 9, "bold"), bd=0, padx=10, pady=3,
-                  command=self.imposta_lotto).pack(side="right")
-        tk.Button(frame_btn_tree, text="🏷️ Imposta Fase", bg="#3498db", fg="white", font=("Arial", 9, "bold"), bd=0,
+        tk.Button(frame_btn_tree, text="✏️ Force Batch", bg="#f1c40f", font=("Arial", 9, "bold"), bd=0, padx=10, pady=3,
+                  command=self.set_batch).pack(side="right")
+        tk.Button(frame_btn_tree, text="🏷️ Set Phase", bg="#3498db", fg="white", font=("Arial", 9, "bold"), bd=0,
                   padx=10, pady=3,
-                  command=self.imposta_fase).pack(side="right", padx=(0, 5))
+                  command=self.set_phase).pack(side="right", padx=(0, 5))
 
-        cols = ("check", "cartella_display", "conteggio", "fase", "lotto_forzato", "percorso_full")
-        self.tree = ttk.Treeview(frame_sx, columns=cols, show="headings", selectmode="extended")
+        cols = ("check", "folder_display", "count", "phase", "forced_batch", "full_path")
+        self.tree = ttk.Treeview(frame_left, columns=cols, show="headings", selectmode="extended")
 
-        self.tree.heading("check", text="Esporta")
-        self.tree.heading("cartella_display", text="Percorso Cartella")
-        self.tree.heading("conteggio", text="PDF Trovati")
-        self.tree.heading("fase", text="Fase (Tag)")
-        self.tree.heading("lotto_forzato", text="Lotto Forzato")
-        self.tree.heading("percorso_full", text="")
+        self.tree.heading("check", text="Export")
+        self.tree.heading("folder_display", text="Folder Path")
+        self.tree.heading("count", text="PDFs Found")
+        self.tree.heading("phase", text="Phase (Tag)")
+        self.tree.heading("forced_batch", text="Forced Batch")
+        self.tree.heading("full_path", text="")
 
         self.tree.column("check", width=65, anchor="center")
-        self.tree.column("cartella_display", width=350, anchor="w")
-        self.tree.column("conteggio", width=80, anchor="center")
-        self.tree.column("fase", width=90, anchor="center")
-        self.tree.column("lotto_forzato", width=130, anchor="center")
-        self.tree.column("percorso_full", width=0, minwidth=0, stretch=tk.NO)
+        self.tree.column("folder_display", width=350, anchor="w")
+        self.tree.column("count", width=80, anchor="center")
+        self.tree.column("phase", width=90, anchor="center")
+        self.tree.column("forced_batch", width=130, anchor="center")
+        self.tree.column("full_path", width=0, minwidth=0, stretch=tk.NO)
 
-        scroll_tree = ttk.Scrollbar(frame_sx, orient="vertical", command=self.tree.yview)
+        scroll_tree = ttk.Scrollbar(frame_left, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scroll_tree.set)
         scroll_tree.pack(side="right", fill="y")
         self.tree.pack(fill="both", expand=True)
         self.tree.bind("<ButtonRelease-1>", self.on_tree_click)
 
-        # DESTRA: Cruscotto e Comandi
-        frame_dx = tk.Frame(paned, bg="#ecf0f1")
-        paned.add(frame_dx, weight=1)
+        # RIGHT: Dashboard and Commands
+        frame_right = tk.Frame(paned, bg="#ecf0f1")
+        paned.add(frame_right, weight=1)
 
-        self.btn_start = tk.Button(frame_dx, text="▶ AVVIA SCRITTURA DB", font=("Arial", 12, "bold"), bg="#27ae60",
-                                   fg="white", height=2, bd=0, command=self.avvia_estrazione)
+        self.btn_start = tk.Button(frame_right, text="▶ START DB WRITING", font=("Arial", 12, "bold"), bg="#27ae60",
+                                   fg="white", height=2, bd=0, command=self.start_extraction)
         self.btn_start.pack(fill="x", pady=(0, 5))
 
-        self.btn_stop = tk.Button(frame_dx, text="⏹ FERMA", font=("Arial", 12, "bold"), bg="#c0392b", fg="white",
-                                  height=2, bd=0, command=self.ferma, state="disabled")
+        self.btn_stop = tk.Button(frame_right, text="⏹ STOP", font=("Arial", 12, "bold"), bg="#c0392b", fg="white",
+                                  height=2, bd=0, command=self.stop, state="disabled")
         self.btn_stop.pack(fill="x", pady=(5, 15))
 
-        frame_dash = tk.LabelFrame(frame_dx, text="Cruscotto Prestazioni", padx=10, pady=10, bg="#ffffff")
+        frame_dash = tk.LabelFrame(frame_right, text="Performance Dashboard", padx=10, pady=10, bg="#ffffff")
         frame_dash.pack(fill="x", pady=(0, 10))
 
         self.lbl_file = tk.Label(frame_dash, text="File: 0 / 0", bg="#ffffff", font=("Consolas", 11))
@@ -236,23 +241,23 @@ class UniversalExtractorApp:
         self.progress_bar.pack(fill="x", pady=(10, 0))
 
         # Log Console Style
-        frame_log = tk.LabelFrame(frame_dx, text="Log Operazioni", bg="#ecf0f1")
+        frame_log = tk.LabelFrame(frame_right, text="Operations Log", bg="#ecf0f1")
         frame_log.pack(fill="both", expand=True)
         self.log_text = scrolledtext.ScrolledText(frame_log, state='disabled', bg="#1e1e1e", fg="#2ecc71",
                                                   font=("Consolas", 9))
         self.log_text.pack(fill="both", expand=True)
 
-        self.carica_cache()
+        self.load_cache()
 
-    # --- METODI CACHE E MEMORIA ---
-    def salva_cache(self):
-        cache_data = {"db_path": self.db_path.get(), "cartelle": {}}
-        for percorso, data in self.dati_cartelle.items():
-            cache_data["cartelle"][percorso] = {
+    # --- CACHE AND MEMORY METHODS ---
+    def save_cache(self):
+        cache_data = {"db_path": self.db_path.get(), "folders": {}}
+        for path, data in self.folder_data.items():
+            cache_data["folders"][path] = {
                 "is_rglob": data["is_rglob"],
                 "check": data["check"],
-                "lotto_forzato": data["lotto_forzato"],
-                "fase": data.get("fase", "POST")
+                "forced_batch": data["forced_batch"],
+                "phase": data.get("phase", "POST")
             }
         try:
             with open("cache_extractor.json", "w", encoding="utf-8") as f:
@@ -260,7 +265,7 @@ class UniversalExtractorApp:
         except Exception:
             pass
 
-    def carica_cache(self):
+    def load_cache(self):
         cache_file = Path("cache_extractor.json")
         if not cache_file.exists(): return
         try:
@@ -268,8 +273,8 @@ class UniversalExtractorApp:
                 cache_data = json.load(f)
             if cache_data.get("db_path") and Path(cache_data["db_path"]).exists():
                 self.db_path.set(cache_data["db_path"])
-            for percorso, info in cache_data.get("cartelle", {}).items():
-                p = Path(percorso)
+            for path, info in cache_data.get("folders", {}).items():
+                p = Path(path)
                 if p.exists():
                     is_rglob = info.get("is_rglob", False)
                     pdfs = list(p.rglob("*.pdf")) if is_rglob else list(p.glob("*.pdf"))
@@ -278,204 +283,192 @@ class UniversalExtractorApp:
                         if old_check == "[X]": old_check = CHECKED
                         if old_check == "[ ]": old_check = UNCHECKED
 
-                        self._aggiungi_a_dati_cartelle(p, pdfs, is_rglob=is_rglob, check=old_check,
-                                                       lotto_forzato=info.get("lotto_forzato", ""),
-                                                       fase=info.get("fase", "POST"))
-            self.popola_treeview()
-            self.log("✅ Cache ripristinata.")
+                        self._add_to_folder_data(p, pdfs, is_rglob=is_rglob, check=old_check,
+                                                 forced_batch=info.get("forced_batch", ""),
+                                                 phase=info.get("phase", "POST"))
+            self.populate_treeview()
+            self.log("✅ Cache restored.")
         except Exception:
             pass
 
-    def scegli_db(self):
-        # FIX: Aggiunto parent=self.root
-        if p := filedialog.askopenfilename(parent=self.root, title="Database SQLite",
-                                           filetypes=[("DB SQLite", "*.db")]):
+    def choose_db(self):
+        if p := filedialog.askopenfilename(parent=self.root, title="Select SQLite Database",
+                                           filetypes=[("SQLite DB", "*.db")]):
             self.db_path.set(p)
-            self.salva_cache()
+            self.save_cache()
 
-    def crea_db(self):
-        # FIX: Aggiunto parent=self.root
-        if p := filedialog.asksaveasfilename(parent=self.root, title="Crea Nuovo DB", defaultextension=".db",
-                                             filetypes=[("DB SQLite", "*.db")],
-                                             initialfile="Nuovo_Database_Calypso.db"):
+    def create_db(self):
+        if p := filedialog.asksaveasfilename(parent=self.root, title="Create New DB", defaultextension=".db",
+                                             filetypes=[("SQLite DB", "*.db")],
+                                             initialfile="New_Calypso_Database.db"):
             try:
                 sqlite3.connect(p).close()
                 self.db_path.set(p)
-                self.salva_cache()
-                self.log(f"✅ DB creato: {Path(p).name}")
+                self.save_cache()
+                self.log(f"✅ DB created: {Path(p).name}")
             except Exception as e:
-                # FIX: Aggiunto parent=self.root
-                messagebox.showerror("Errore", str(e), parent=self.root)
+                messagebox.showerror("Error", str(e), parent=self.root)
 
-    def _aggiungi_a_dati_cartelle(self, percorso, pdfs, is_rglob=False, check=CHECKED, lotto_forzato="", fase="POST"):
-        percorso_str = str(percorso)
-        p = Path(percorso)
+    def _add_to_folder_data(self, path, pdfs, is_rglob=False, check=CHECKED, forced_batch="", phase="POST"):
+        path_str = str(path)
+        p = Path(path)
         display_path = f"...\\{p.parts[-2]}\\{p.parts[-1]}" if len(p.parts) >= 2 else p.name
 
-        if percorso_str not in self.dati_cartelle:
-            self.dati_cartelle[percorso_str] = {"pdfs": pdfs, "is_rglob": is_rglob, "check": check,
-                                                "lotto_forzato": lotto_forzato, "display_path": display_path,
-                                                "fase": fase}
+        if path_str not in self.folder_data:
+            self.folder_data[path_str] = {"pdfs": pdfs, "is_rglob": is_rglob, "check": check,
+                                          "forced_batch": forced_batch, "display_path": display_path,
+                                          "phase": phase}
             return True
         else:
-            self.dati_cartelle[percorso_str].update({"pdfs": pdfs, "is_rglob": is_rglob})
+            self.folder_data[path_str].update({"pdfs": pdfs, "is_rglob": is_rglob})
             return False
 
-    def aggiungi_macrocartella(self):
-        # FIX: Aggiunto parent=self.root
-        if cartella := filedialog.askdirectory(parent=self.root, title="Seleziona la Macrocartella"):
-            base_dir = Path(cartella)
-            self.log(f"Scansione Ricorsiva Batch: {base_dir.name}...")
-            nuove = sum(1 for sub in base_dir.iterdir() if
-                        sub.is_dir() and (pdfs := list(sub.rglob("*.pdf"))) and self._aggiungi_a_dati_cartelle(sub,
-                                                                                                               pdfs,
-                                                                                                               is_rglob=True))
+    def add_macrofolder(self):
+        if folder := filedialog.askdirectory(parent=self.root, title="Select Macrofolder"):
+            base_dir = Path(folder)
+            self.log(f"Recursive Batch Scan: {base_dir.name}...")
+            new_rows = sum(1 for sub in base_dir.iterdir() if
+                        sub.is_dir() and (pdfs := list(sub.rglob("*.pdf"))) and self._add_to_folder_data(sub,
+                                                                                                         pdfs,
+                                                                                                         is_rglob=True))
             if root_pdfs := list(base_dir.glob("*.pdf")):
-                if self._aggiungi_a_dati_cartelle(base_dir, root_pdfs, is_rglob=False): nuove += 1
-            self.popola_treeview()
-            self.log(f"Aggiunte {nuove} nuove righe separate.")
+                if self._add_to_folder_data(base_dir, root_pdfs, is_rglob=False): new_rows += 1
+            self.populate_treeview()
+            self.log(f"Added {new_rows} new separate rows.")
 
-    def aggiungi_cartella_singola(self):
-        # FIX: Aggiunto parent=self.root
-        if cartella := filedialog.askdirectory(parent=self.root, title="Seleziona cartella"):
-            sub_dir = Path(cartella)
-            # FIX: Aggiunto parent=self.root
-            inc_sub = messagebox.askyesno("Sottocartelle",
-                                          "Includere i PDF presenti anche nelle sottocartelle interne in questo unico blocco?",
+    def add_single_folder(self):
+        if folder := filedialog.askdirectory(parent=self.root, title="Select folder"):
+            sub_dir = Path(folder)
+            inc_sub = messagebox.askyesno("Subfolders",
+                                          "Include PDFs found in internal subfolders in this single block?",
                                           parent=self.root)
             if pdfs := list(sub_dir.rglob("*.pdf") if inc_sub else sub_dir.glob("*.pdf")):
-                if self._aggiungi_a_dati_cartelle(sub_dir, pdfs, is_rglob=inc_sub):
-                    self.popola_treeview()
-                    self.log(f"Aggiunto blocco unico da: {sub_dir.name} ({len(pdfs)} PDF).")
+                if self._add_to_folder_data(sub_dir, pdfs, is_rglob=inc_sub):
+                    self.populate_treeview()
+                    self.log(f"Added single block from: {sub_dir.name} ({len(pdfs)} PDFs).")
             else:
-                # FIX: Aggiunto parent=self.root
-                messagebox.showinfo("Nessun PDF", "La cartella è vuota.", parent=self.root)
+                messagebox.showinfo("No PDF", "The folder is empty.", parent=self.root)
 
-    def rimuovi_cartella_selezionata(self):
+    def remove_selected_folder(self):
         for item in self.tree.selection():
-            if (pa := self.tree.item(item, "values")[5]) in self.dati_cartelle:
-                del self.dati_cartelle[pa]
+            if (pa := self.tree.item(item, "values")[5]) in self.folder_data:
+                del self.folder_data[pa]
             self.tree.delete(item)
-        self.salva_cache()
+        self.save_cache()
 
-    def popola_treeview(self):
+    def populate_treeview(self):
         self.tree.delete(*self.tree.get_children())
-        for p, d in sorted(self.dati_cartelle.items()):
-            testo_lotto = d["lotto_forzato"]
-            self.tree.insert("", tk.END, values=(d["check"], d["display_path"], len(d["pdfs"]), d.get("fase", "POST"),
-                                                 testo_lotto, p))
-        self.salva_cache()
+        for p, d in sorted(self.folder_data.items()):
+            batch_text = d["forced_batch"]
+            self.tree.insert("", tk.END, values=(d["check"], d["display_path"], len(d["pdfs"]), d.get("phase", "POST"),
+                                                 batch_text, p))
+        self.save_cache()
 
     def on_tree_click(self, event):
         if self.tree.identify("region", event.x, event.y) == "cell" and self.tree.identify_column(event.x) == '#1':
             item = self.tree.identify_row(event.y)
             pa = self.tree.item(item, "values")[5]
-            n_stato = UNCHECKED if self.dati_cartelle[pa]["check"] == CHECKED else CHECKED
-            items_agg = [item]
+            new_state = UNCHECKED if self.folder_data[pa]["check"] == CHECKED else CHECKED
+            items_to_update = [item]
 
             if event.state & 0x0001 and getattr(self, "last_clicked_item", None):
                 items = self.tree.get_children()
                 try:
                     i1, i2 = items.index(self.last_clicked_item), items.index(item)
-                    items_agg = items[min(i1, i2):max(i1, i2) + 1]
+                    items_to_update = items[min(i1, i2):max(i1, i2) + 1]
                 except ValueError:
                     pass
 
-            for c_item in items_agg:
+            for c_item in items_to_update:
                 pa = self.tree.item(c_item, "values")[5]
-                self.dati_cartelle[pa]["check"] = n_stato
-                d = self.dati_cartelle[pa]
-                testo_lotto = d["lotto_forzato"]
-                self.tree.item(c_item, values=(d["check"], d["display_path"], len(d["pdfs"]), d.get("fase", "POST"),
-                                               testo_lotto, pa))
+                self.folder_data[pa]["check"] = new_state
+                d = self.folder_data[pa]
+                batch_text = d["forced_batch"]
+                self.tree.item(c_item, values=(d["check"], d["display_path"], len(d["pdfs"]), d.get("phase", "POST"),
+                                               batch_text, pa))
 
             self.last_clicked_item = item
-            self.salva_cache()
+            self.save_cache()
 
-    def seleziona_tutto(self):
+    def select_all(self):
         for item in self.tree.get_children():
             pa = self.tree.item(item, "values")[5]
-            self.dati_cartelle[pa]["check"] = CHECKED
-            d = self.dati_cartelle[pa]
-            testo_lotto = d["lotto_forzato"]
-            self.tree.item(item, values=(d["check"], d["display_path"], len(d["pdfs"]), d.get("fase", "POST"),
-                                         testo_lotto, pa))
-        self.salva_cache()
+            self.folder_data[pa]["check"] = CHECKED
+            d = self.folder_data[pa]
+            batch_text = d["forced_batch"]
+            self.tree.item(item, values=(d["check"], d["display_path"], len(d["pdfs"]), d.get("phase", "POST"),
+                                         batch_text, pa))
+        self.save_cache()
 
-    def deseleziona_tutto(self):
+    def deselect_all(self):
         for item in self.tree.get_children():
             pa = self.tree.item(item, "values")[5]
-            self.dati_cartelle[pa]["check"] = UNCHECKED
-            d = self.dati_cartelle[pa]
-            testo_lotto = d["lotto_forzato"]
-            self.tree.item(item, values=(d["check"], d["display_path"], len(d["pdfs"]), d.get("fase", "POST"),
-                                         testo_lotto, pa))
-        self.salva_cache()
+            self.folder_data[pa]["check"] = UNCHECKED
+            d = self.folder_data[pa]
+            batch_text = d["forced_batch"]
+            self.tree.item(item, values=(d["check"], d["display_path"], len(d["pdfs"]), d.get("phase", "POST"),
+                                         batch_text, pa))
+        self.save_cache()
 
-    def imposta_lotto(self):
+    def set_batch(self):
         if not (sel := self.tree.selection()):
-            # FIX: Aggiunto parent=self.root
-            return messagebox.showinfo("Info", "Seleziona righe dalla tabella.", parent=self.root)
-        primo = self.tree.item(sel[0], "values")[5]
-        # FIX: Aggiunto parent=self.root
+            return messagebox.showinfo("Info", "Select rows from the table.", parent=self.root)
+        first = self.tree.item(sel[0], "values")[5]
         if (
-                n_lotto := simpledialog.askstring("Forza Lotto",
-                                                  "Inserisci lotto (lascia vuoto per leggere dal NOME FILE):",
-                                                  initialvalue=self.dati_cartelle[primo]["lotto_forzato"],
+                n_batch := simpledialog.askstring("Force Batch",
+                                                  "Enter batch (leave empty to read from FILE NAME):",
+                                                  initialvalue=self.folder_data[first]["forced_batch"],
                                                   parent=self.root)) is not None:
-            l_pulito = n_lotto.strip().upper()
+            clean_batch = n_batch.strip().upper()
             for item in sel:
                 pa = self.tree.item(item, "values")[5]
-                self.dati_cartelle[pa]["lotto_forzato"] = l_pulito
-                d = self.dati_cartelle[pa]
-                testo_lotto = l_pulito
-                self.tree.item(item, values=(d["check"], d["display_path"], len(d["pdfs"]), d.get("fase", "POST"),
-                                             testo_lotto, pa))
-            self.salva_cache()
+                self.folder_data[pa]["forced_batch"] = clean_batch
+                d = self.folder_data[pa]
+                batch_text = clean_batch
+                self.tree.item(item, values=(d["check"], d["display_path"], len(d["pdfs"]), d.get("phase", "POST"),
+                                             batch_text, pa))
+            self.save_cache()
 
-    def imposta_fase(self):
+    def set_phase(self):
         if not (sel := self.tree.selection()):
-            # FIX: Aggiunto parent=self.root
-            return messagebox.showinfo("Info", "Seleziona righe dalla tabella.", parent=self.root)
-        primo = self.tree.item(sel[0], "values")[5]
+            return messagebox.showinfo("Info", "Select rows from the table.", parent=self.root)
+        first = self.tree.item(sel[0], "values")[5]
 
-        # FIX: Aggiunto parent=self.root
-        if (n_fase := simpledialog.askstring("Imposta Fase", "Inserisci la Fase (es. PRE, POST, SCARTO):",
-                                             initialvalue=self.dati_cartelle[primo].get("fase", "POST"),
+        if (n_phase := simpledialog.askstring("Set Phase", "Enter the Phase (e.g. PRE, POST, SCRAP):",
+                                             initialvalue=self.folder_data[first].get("phase", "POST"),
                                              parent=self.root)) is not None:
-            f_pulita = n_fase.strip().upper()
+            clean_phase = n_phase.strip().upper()
             for item in sel:
                 pa = self.tree.item(item, "values")[5]
-                self.dati_cartelle[pa]["fase"] = f_pulita
-                d = self.dati_cartelle[pa]
-                testo_lotto = d["lotto_forzato"]
+                self.folder_data[pa]["phase"] = clean_phase
+                d = self.folder_data[pa]
+                batch_text = d["forced_batch"]
                 self.tree.item(item,
-                               values=(d["check"], d["display_path"], len(d["pdfs"]), d["fase"], testo_lotto,
+                               values=(d["check"], d["display_path"], len(d["pdfs"]), d["phase"], batch_text,
                                        pa))
-            self.salva_cache()
+            self.save_cache()
 
     def log(self, m):
-        ora = time.strftime("%H:%M:%S")
-        testo_formattato = f"[{ora}] {m}"
+        current_time = time.strftime("%H:%M:%S")
+        formatted_text = f"[{current_time}] {m}"
 
         def a():
             self.log_text.config(state='normal')
-            self.log_text.insert(tk.END, testo_formattato + "\n")
+            self.log_text.insert(tk.END, formatted_text + "\n")
             self.log_text.see(tk.END)
             self.log_text.config(state='disabled')
 
         self.root.after(0, a)
 
-    # --- GRACEFUL SHUTDOWN (CHIUSURA PULITA) ---
-    def ferma(self):
-        # FIX: Aggiunto parent=self.root
-        risposta = messagebox.askyesno("Conferma Arresto",
-                                       "Vuoi interrompere l'estrazione e chiudere l'applicazione?\n\nI file in coda verranno cancellati, mentre quelli attualmente in lavorazione verranno salvati.",
+    # --- GRACEFUL SHUTDOWN ---
+    def stop(self):
+        answer = messagebox.askyesno("Confirm Stop",
+                                       "Do you want to stop extraction and close the application?\n\nFiles in queue will be cancelled, while those currently being processed will be saved.",
                                        parent=self.root)
-        if risposta:
+        if answer:
             self.stop_flag.set()
-            self.btn_stop.config(state="disabled", text="CHIUSURA IN CORSO...")
-            self.log("⚠️ Richiesta di arresto. Svuotamento coda in corso...")
+            self.btn_stop.config(state="disabled", text="CLOSING IN PROGRESS...")
+            self.log("⚠️ Stop request. Emptying queue...")
 
     def update_dash(self, p, t, s):
         def a():
@@ -493,13 +486,12 @@ class UniversalExtractorApp:
 
     def reset_ui(self):
         self.btn_start.config(state="normal")
-        self.btn_stop.config(state="disabled", text="⏹ FERMA")
+        self.btn_stop.config(state="disabled", text="⏹ STOP")
 
-    # --- PROCESSO DI ESTRAZIONE ---
-    def avvia_estrazione(self):
-        if not self.db_path.get() or not self.dati_cartelle:
-            # FIX: Aggiunto parent=self.root
-            return messagebox.showwarning("Errore", "Configura il DB e aggiungi almeno una cartella!", parent=self.root)
+    # --- EXTRACTION PROCESS ---
+    def start_extraction(self):
+        if not self.db_path.get() or not self.folder_data:
+            return messagebox.showwarning("Error", "Configure the DB and add at least one folder!", parent=self.root)
 
         self.btn_start.config(state="disabled")
         self.btn_stop.config(state="normal")
@@ -508,11 +500,11 @@ class UniversalExtractorApp:
         self.log_text.delete(1.0, tk.END)
         self.log_text.config(state='disabled')
 
-        threading.Thread(target=self.processo_estrazione, daemon=True).start()
+        threading.Thread(target=self.extraction_process, daemon=True).start()
 
-    def processo_estrazione(self):
-        self.log("🚀 Avvio Estrazione Universale Multi-Tag.")
-        self.log("⚙️ Connessione al Database...")
+    def extraction_process(self):
+        self.log("🚀 Starting Universal Multi-Tag Extraction.")
+        self.log("⚙️ Connecting to Database...")
 
         conn = sqlite3.connect(self.db_path.get(), check_same_thread=False)
         cursor = conn.cursor()
@@ -520,6 +512,7 @@ class UniversalExtractorApp:
         cursor.execute("PRAGMA synchronous = NORMAL;")
         cursor.execute("PRAGMA temp_store = MEMORY;")
 
+        # keeping Italian database column names to maintain compatibility with other scripts
         cursor.execute("""CREATE TABLE IF NOT EXISTS misurazioni
                           (
                               id
@@ -567,36 +560,36 @@ class UniversalExtractorApp:
             conn.commit()
 
         cursor.execute("SELECT file_pdf FROM registro_file")
-        fatti = set(r[0] for r in cursor.fetchall())
+        done_files = set(r[0] for r in cursor.fetchall())
 
-        lista_lavori = []
-        for p_ass, data in self.dati_cartelle.items():
+        job_list = []
+        for p_abs, data in self.folder_data.items():
             if data["check"] == CHECKED:
-                fase_cartella = data.get("fase", "POST")
+                folder_phase = data.get("phase", "POST")
                 for pdf_path in data["pdfs"]:
-                    if str(pdf_path) not in fatti:
+                    if str(pdf_path) not in done_files:
                         parts = pdf_path.stem.split('_')
                         if len(parts) >= 2:
-                            codice = parts[0].upper()
-                            lotto = data["lotto_forzato"] if data["lotto_forzato"] else parts[1].upper()
-                            lista_lavori.append((str(pdf_path), codice, lotto, fase_cartella))
+                            code = parts[0].upper()
+                            batch = data["forced_batch"] if data["forced_batch"] else parts[1].upper()
+                            job_list.append((str(pdf_path), code, batch, folder_phase))
                         else:
-                            self.log(f"⚠️ Ignorato file non conforme: {pdf_path.name}")
+                            self.log(f"⚠️ Ignored non-compliant file: {pdf_path.name}")
 
-        if not lista_lavori:
-            self.log("✅ Nessun nuovo file valido da estrarre.")
+        if not job_list:
+            self.log("✅ No new valid files to extract.")
             self.root.after(0, self.reset_ui)
             return
 
-        totale_lavori = len(lista_lavori)
-        self.log(f"🎯 Pronti {totale_lavori} file per l'estrazione.")
+        total_jobs = len(job_list)
+        self.log(f"🎯 Ready {total_jobs} files for extraction.")
 
         start_t = time.time()
-        file_p, misure_s = 0, 0
+        processed_files, saved_measures = 0, 0
 
-        # Worker per estrazione parallela
+        # Parallel extraction workers
         with ProcessPoolExecutor(max_workers=3) as ex:
-            futs = {ex.submit(worker_estrazione_misure, job): job for job in lista_lavori}
+            futs = {ex.submit(worker_extract_measures, job): job for job in job_list}
             for f in as_completed(futs):
 
                 if self.stop_flag.is_set():
@@ -604,41 +597,40 @@ class UniversalExtractorApp:
                         future.cancel()
                     break
 
-                file_p += 1
+                processed_files += 1
                 res = f.result()
                 if "data" in res and res["data"]:
                     cursor.executemany(
                         "INSERT INTO misurazioni (file_pdf, cartella_padre, codice_pezzo, lotto, sezione, nome_misura, misurato_mm, nominale_mm, tolleranza_piu, tolleranza_meno, deviazione, extra_dev, stato, fase) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         res["data"])
                     cursor.execute("INSERT OR IGNORE INTO registro_file (file_pdf) VALUES (?)", (res["file_path"],))
-                    misure_s += len(res["data"])
+                    saved_measures += len(res["data"])
 
-                if file_p % 20 == 0:
+                if processed_files % 20 == 0:
                     conn.commit()
-                    self.update_dash(file_p, totale_lavori, start_t)
+                    self.update_dash(processed_files, total_jobs, start_t)
 
         conn.commit()
         conn.close()
 
-        tempo_totale = time.time() - start_t
-        m_tot, s_tot = divmod(int(tempo_totale), 60)
+        total_time = time.time() - start_t
+        m_tot, s_tot = divmod(int(total_time), 60)
 
         if self.stop_flag.is_set():
-            self.log("🛑 Estrazione fermata in sicurezza. Chiusura app tra 2 secondi...")
+            self.log("🛑 Extraction stopped safely. Closing app in 2 seconds...")
             self.root.after(2000, self.root.destroy)
         else:
-            self.log(f"🏁 FINITO IN {tempo_totale:.1f} SECONDI")
-            self.log(f"📄 File processati: {file_p} | Misure: {misure_s}")
-            # FIX: Aggiunto parent=self.root
-            self.root.after(0, lambda: messagebox.showinfo("Completato",
-                                                           f"Estrazione DB completata!\n\nMisure aggiunte: {misure_s}",
+            self.log(f"🏁 FINISHED IN {total_time:.1f} SECONDS")
+            self.log(f"📄 Processed files: {processed_files} | Measures: {saved_measures}")
+            self.root.after(0, lambda: messagebox.showinfo("Completed",
+                                                           f"DB extraction completed!\n\nMeasures added: {saved_measures}",
                                                            parent=self.root))
             self.root.after(0, self.reset_ui)
 
 
 if __name__ == "__main__":
     try:
-        # Aggiunta ID per Windows Taskbar
+        # Add ID for Windows Taskbar
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Calypso.Extractor.Macro")
     except Exception:
         pass
