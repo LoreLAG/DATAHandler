@@ -7,11 +7,11 @@ import ctypes
 
 # Import your scripts directly as modules!
 try:
-    import DaPDF
-    import EstraiDati_LIGHT
-    import EstraiDatiMACRO
-    import ConsultaDB
-    import CreaGRAPHS  # Module for graphs
+    import RenamePDF
+    import EXTRACTDATA_LIGHT
+    import EXTRACTDATA_HEAVY
+    import ExploreDB
+    import CreateGRAPHS  # Module for graphs
 except ImportError as e:
     messagebox.showerror("Startup Error", f"Unable to find one of the scripts:\n{e}")
 
