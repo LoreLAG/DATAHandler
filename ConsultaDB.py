@@ -6,84 +6,84 @@ from pathlib import Path
 import ctypes
 
 
-class NavigatoreSQLiteApp:
+class SQLiteNavigatorApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Navigatore Database SQLite (Pro Edition)")
+        self.root.title("SQLite Database Navigator")
         self.root.geometry("1400x850")
         self.root.minsize(1200, 700)
         self.root.configure(bg="#ecf0f1")
 
         try:
-            self.root.state('zoomed')  # Comando per Windows
+            self.root.state('zoomed')  # Command for Windows
         except tk.TclError:
-            self.root.attributes('-zoomed', True)  # Alternativa per Linux/Mac
+            self.root.attributes('-zoomed', True)  # Alternative for Linux/Mac
 
-        # Motore Dati
-        self.df_completo = pd.DataFrame()
-        self.df_filtrato = pd.DataFrame()
+        # Data Engine
+        self.df_complete = pd.DataFrame()
+        self.df_filtered = pd.DataFrame()
         self.file_path_db = None
 
-        # Gestione Pannello Misure Dinamico
-        self.codice_corrente = None
-        self.misure_visibili_vars = {}
+        # Dynamic Measure Panel Management
+        self.current_code = None
+        self.visible_measures_vars = {}
 
         # ==========================================
-        # DIZIONARIO TRADUTTORE: Nome DB -> Nome Visualizzato
+        # TRANSLATION DICTIONARY: DB Name -> Display Name
         # ==========================================
-        self.nomi_display = {
+        self.display_names = {
             'id': 'id',
             'file_pdf': 'File',
-            'cartella_padre': 'Cartella',
-            'codice_pezzo': 'Codice',
-            'lotto': 'Lotto',
-            'sezione': 'Sezione',
-            'nome_misura': 'Misura',
-            'misurato_mm': 'Misurato',
-            'nominale_mm': 'Nominale',
+            'cartella_padre': 'Folder',
+            'codice_pezzo': 'Code',
+            'lotto': 'Batch',
+            'sezione': 'Section',
+            'nome_misura': 'Measure',
+            'misurato_mm': 'Measured',
+            'nominale_mm': 'Nominal',
             'tolleranza_piu': 'T+',
             'tolleranza_meno': 'T-',
-            'deviazione': 'Scostamento',
+            'deviazione': 'Deviation',
             'extra_dev': 'Extra Dev.',
-            'stato': 'Stato',
-            'fase': 'Fase'
+            'stato': 'Status',
+            'fase': 'Phase'
         }
 
         self.setup_ui()
 
-    def get_nome_visivo(self, col_db):
-        """Restituisce il nome formattato se esiste, altrimenti capitalizza quello del DB."""
-        return self.nomi_display.get(col_db, col_db.replace("_", " ").title())
+    def get_visual_name(self, db_col):
+        """Returns the formatted name if it exists, otherwise capitalizes the DB one."""
+        return self.display_names.get(db_col, db_col.replace("_", " ").title())
 
     # ==========================================
-    # LOGICA: BLOCCO INTERFACCIA DURANTE IL LAVORO
+    # LOGIC: LOCK INTERFACE DURING WORK
     # ==========================================
-    def imposta_caricamento(self, in_caricamento=True, messaggio="⏳ Elaborazione in corso..."):
-        """Blocca l'UI e mostra il cursore di caricamento, o sblocca tutto a fine lavoro."""
-        if in_caricamento:
+    def set_loading(self, is_loading=True, message="⏳ Processing in progress..."):
+        """Locks the UI and shows the loading cursor, or unlocks everything when done."""
+        if is_loading:
             self.root.config(cursor="watch")
-            self.lbl_file.config(text=messaggio, fg="#f1c40f")
+            self.lbl_file.config(text=message, fg="#f1c40f")
 
-            self.btn_carica.config(state="disabled")
-            self.btn_esporta.config(state="disabled")
+            self.btn_load.config(state="disabled")
+            self.btn_export.config(state="disabled")
             self.btn_reset.config(state="disabled")
-            self.btn_modifica.config(state="disabled")
-            self.btn_rinomina_misura.config(state="disabled")
-            self.btn_toggle_misure.config(state="disabled")
+            self.btn_edit.config(state="disabled")
+            self.btn_rename_measure.config(state="disabled")
+            self.btn_toggle_measures.config(state="disabled")
 
             self.root.update()
         else:
             self.root.config(cursor="")
             self.lbl_file.config(fg="white")
 
-            self.btn_carica.config(state="normal")
-            self.btn_esporta.config(state="normal")
+            self.btn_load.config(state="normal")
+            self.btn_export.config(state="normal")
             self.btn_reset.config(state="normal")
-            self.btn_modifica.config(state="normal")
+            self.btn_edit.config(state="normal")
 
-            if self.codice_corrente:
-                self.btn_rinomina_misura.config(state="normal")
-                self.btn_toggle_misure.config(state="normal")
+            if self.current_code:
+                self.btn_rename_measure.config(state="normal")
+                self.btn_toggle_measures.config(state="normal")
 
     def setup_ui(self):
         style = ttk.Style()
@@ -93,25 +93,25 @@ class NavigatoreSQLiteApp:
         style.configure("Treeview.Heading", font=("Arial", 10, "bold"), background="#d5d8dc")
 
         # ==========================================
-        # 1. TOP BAR: CARICAMENTO FILE
+        # 1. TOP BAR: FILE LOADING
         # ==========================================
         frame_top = tk.Frame(self.root, bg="#1c2833", pady=15, padx=20)
         frame_top.pack(fill="x", side="top")
 
-        self.lbl_file = tk.Label(frame_top, text="Nessun Database caricato", bg="#1c2833", fg="white",
+        self.lbl_file = tk.Label(frame_top, text="No Database loaded", bg="#1c2833", fg="white",
                                  font=("Arial", 12, "bold"))
         self.lbl_file.pack(side="left", padx=10)
 
-        self.btn_carica = tk.Button(frame_top, text="📂 Carica Database SQLite (.db)", command=self.carica_db,
+        self.btn_load = tk.Button(frame_top, text="📂 Load SQLite Database (.db)", command=self.load_db,
                                     bg="#3498db", fg="white", font=("Arial", 10, "bold"), bd=0, padx=15, pady=4)
-        self.btn_carica.pack(side="right")
+        self.btn_load.pack(side="right")
 
-        self.btn_esporta = tk.Button(frame_top, text="💾 Esporta in Excel / CSV", command=self.esporta_dati,
+        self.btn_export = tk.Button(frame_top, text="💾 Export to Excel / CSV", command=self.export_data,
                                      bg="#27ae60", fg="white", font=("Arial", 10, "bold"), bd=0, padx=15, pady=4)
-        self.btn_esporta.pack(side="right", padx=10)
+        self.btn_export.pack(side="right", padx=10)
 
         # ==========================================
-        # 2. LEFT BAR: SCORREVOLE GLOBALE
+        # 2. LEFT BAR: GLOBAL SCROLL
         # ==========================================
         left_container = tk.Frame(self.root, width=240, bg="#ecf0f1")
         left_container.pack_propagate(False)
@@ -136,83 +136,83 @@ class NavigatoreSQLiteApp:
         left_container.bind("<Enter>", lambda e: self.canvas_left.bind_all("<MouseWheel>", _on_mousewheel))
         left_container.bind("<Leave>", lambda e: self.canvas_left.unbind_all("<MouseWheel>"))
 
-        # --- Sezione Filtri ---
-        frame_filtri = tk.LabelFrame(self.frame_left, text="🔍 Filtri Dinamici", font=("Arial", 10, "bold"),
-                                     bg="#ecf0f1", padx=10, pady=10)
-        frame_filtri.pack(fill="x", pady=(0, 15))
+        # --- Filters Section ---
+        frame_filters = tk.LabelFrame(self.frame_left, text="🔍 Dynamic Filters", font=("Arial", 10, "bold"),
+                                      bg="#ecf0f1", padx=10, pady=10)
+        frame_filters.pack(fill="x", pady=(0, 15))
 
-        tk.Label(frame_filtri, text="Digita e premi INVIO\no seleziona dalla lista.", fg="#7f8c8d", bg="#ecf0f1",
+        tk.Label(frame_filters, text="Type and press ENTER\nor select from the list.", fg="#7f8c8d", bg="#ecf0f1",
                  font=("Arial", 9, "italic")).pack(pady=(0, 8))
 
-        self.filtri_combo = {}
-        self.frame_filtri_dinamici = tk.Frame(frame_filtri, bg="#ecf0f1")
-        self.frame_filtri_dinamici.pack(fill="x")
+        self.combo_filters = {}
+        self.frame_dynamic_filters = tk.Frame(frame_filters, bg="#ecf0f1")
+        self.frame_dynamic_filters.pack(fill="x")
 
-        self.btn_reset = tk.Button(frame_filtri, text="🔄 Resetta Filtri", command=self.reset_filtri, bg="#e74c3c",
+        self.btn_reset = tk.Button(frame_filters, text="🔄 Reset Filters", command=self.reset_filters, bg="#e74c3c",
                                    fg="white", font=("Arial", 10, "bold"), bd=0, pady=4)
         self.btn_reset.pack(fill="x", pady=(15, 5))
 
-        # --- Sezione Visibilità Colonne ---
-        self.frame_visibilita = tk.LabelFrame(self.frame_left, text="👁️ Visibilità Colonne", font=("Arial", 10, "bold"),
+        # --- Column Visibility Section ---
+        self.frame_visibility = tk.LabelFrame(self.frame_left, text="👁️ Column Visibility", font=("Arial", 10, "bold"),
                                               bg="#ecf0f1", padx=10, pady=10)
-        self.frame_visibilita.pack(fill="x", pady=15)
+        self.frame_visibility.pack(fill="x", pady=15)
 
-        self.colonne_visibili_vars = {}
-        self.inner_frame_visibilita = tk.Frame(self.frame_visibilita, bg="#ecf0f1")
-        self.inner_frame_visibilita.pack(fill="x")
+        self.visible_columns_vars = {}
+        self.inner_frame_visibility = tk.Frame(self.frame_visibility, bg="#ecf0f1")
+        self.inner_frame_visibility.pack(fill="x")
 
-        # --- NUOVA SEZIONE: Visibilità e Gestione Misure ---
-        self.frame_misure = tk.LabelFrame(self.frame_left, text="📏 Gestione Misure", font=("Arial", 10, "bold"),
+        # --- NEW SECTION: Measure Visibility and Management ---
+        self.frame_measures = tk.LabelFrame(self.frame_left, text="📏 Measure Management", font=("Arial", 10, "bold"),
                                           bg="#ecf0f1", padx=10, pady=10)
-        self.frame_misure.pack(fill="x", pady=15)
+        self.frame_measures.pack(fill="x", pady=15)
 
-        self.lbl_stato_misure = tk.Label(self.frame_misure, text="Seleziona un CODICE", fg="#7f8c8d", bg="#ecf0f1",
+        self.lbl_measures_status = tk.Label(self.frame_measures, text="Select a CODE", fg="#7f8c8d", bg="#ecf0f1",
                                          font=("Arial", 9, "italic"))
-        self.lbl_stato_misure.pack(pady=(0, 8))
+        self.lbl_measures_status.pack(pady=(0, 8))
 
-        self.btn_toggle_misure = tk.Button(self.frame_misure, text="☑ Seleziona Tutto/Nessuno",
-                                           command=self.toggle_misure, state="disabled", font=("Arial", 9), bd=0,
+        self.btn_toggle_measures = tk.Button(self.frame_measures, text="☑ Select All/None",
+                                           command=self.toggle_measures, state="disabled", font=("Arial", 9), bd=0,
                                            bg="#bdc3c7", pady=2)
-        self.btn_toggle_misure.pack(fill="x", pady=(0, 5))
+        self.btn_toggle_measures.pack(fill="x", pady=(0, 5))
 
-        self.btn_rinomina_misura = tk.Button(self.frame_misure, text="✏️ Rinomina in Blocco",
-                                             command=self.apri_rinomina_misura, state="disabled", bg="#f39c12",
+        self.btn_rename_measure = tk.Button(self.frame_measures, text="✏️ Batch Rename",
+                                             command=self.open_rename_measure, state="disabled", bg="#f39c12",
                                              fg="white", font=("Arial", 9, "bold"), bd=0, pady=4)
-        self.btn_rinomina_misura.pack(fill="x", pady=(0, 10))
+        self.btn_rename_measure.pack(fill="x", pady=(0, 10))
 
-        self.inner_frame_misure = tk.Frame(self.frame_misure, bg="#ecf0f1")
-        self.inner_frame_misure.pack(fill="x")
+        self.inner_frame_measures = tk.Frame(self.frame_measures, bg="#ecf0f1")
+        self.inner_frame_measures.pack(fill="x")
 
         # ==========================================
-        # 3. RIGHT BAR: STATISTICHE E AGGREGAZIONI
+        # 3. RIGHT BAR: STATISTICS AND AGGREGATIONS
         # ==========================================
-        frame_right = tk.LabelFrame(self.root, text="📊 Cruscotto Statistiche", font=("Arial", 10, "bold"), bg="#ecf0f1",
+        frame_right = tk.LabelFrame(self.root, text="📊 Statistics Dashboard", font=("Arial", 10, "bold"), bg="#ecf0f1",
                                     padx=15, pady=15, width=280)
         frame_right.pack(side="right", fill="y", padx=15, pady=15)
         frame_right.pack_propagate(False)
 
-        self.testo_statistiche = tk.Text(frame_right, state="disabled", wrap="word", bg="#ffffff", fg="#2c3e50",
+        self.text_statistics = tk.Text(frame_right, state="disabled", wrap="word", bg="#ffffff", fg="#2c3e50",
                                          font=("Consolas", 10), bd=0, padx=5, pady=5)
-        self.testo_statistiche.pack(fill="both", expand=True)
+        self.text_statistics.pack(fill="both", expand=True)
 
         # ==========================================
-        # 4. CENTER: TABELLA DATI E ISTRUZIONI
+        # 4. CENTER: DATA TABLE AND INSTRUCTIONS
         # ==========================================
         frame_center = tk.Frame(self.root, bg="#ecf0f1")
         frame_center.pack(side="left", fill="both", expand=True, pady=15)
 
-        frame_comandi_tabella = tk.Frame(frame_center, bg="#ecf0f1")
-        frame_comandi_tabella.pack(fill="x", pady=(0, 10))
+        frame_table_commands = tk.Frame(frame_center, bg="#ecf0f1")
+        frame_table_commands.pack(fill="x", pady=(0, 10))
 
-        lbl_istruzioni = tk.Label(frame_comandi_tabella,
-                                  text="💡 Per modificare una riga usa doppio click, invio o tasto destro. Multi-selezione supportata.",
+        lbl_instructions = tk.Label(frame_table_commands,
+                                  text="💡 Double-click, press Enter or right-click to edit a row. Multi-selection supported.",
                                   bg="#fff9c4", fg="#333", font=("Arial", 10), justify="left", padx=10, pady=4)
-        lbl_istruzioni.pack(side="left")
+        lbl_instructions.pack(side="left")
 
-        self.btn_modifica = tk.Button(frame_comandi_tabella, text="✏️ Modifica Selezionati", bg="#3498db", fg="white",
+        self.btn_edit = tk.Button(frame_table_commands, text="✏️ Edit Selected", bg="#3498db", fg="white",
                                       font=("Arial", 10, "bold"), bd=0, padx=15, pady=4,
-                                      command=lambda: self.apri_modifica_multipla())
-        self.btn_modifica.pack(side="right")
+                                      command=lambda: self.open_multiple_edit())
+        self.btn_edit.pack(side="right")
 
         scroll_y = ttk.Scrollbar(frame_center, orient="vertical")
         scroll_x = ttk.Scrollbar(frame_center, orient="horizontal")
@@ -227,21 +227,21 @@ class NavigatoreSQLiteApp:
         scroll_x.pack(side="bottom", fill="x")
         self.tree.pack(side="left", fill="both", expand=True)
 
-        self.tree.bind("<Return>", lambda e: self.apri_modifica_multipla())
+        self.tree.bind("<Return>", lambda e: self.open_multiple_edit())
 
-        self.menu_destro = tk.Menu(self.root, tearoff=0)
-        self.menu_destro.add_command(label="✏️ Modifica Selezionati", command=lambda: self.apri_modifica_multipla())
-        self.tree.bind("<Button-3>", self.mostra_menu_destro)
-        self.tree.bind("<Double-1>", self.apri_modifica_singola)
+        self.right_menu = tk.Menu(self.root, tearoff=0)
+        self.right_menu.add_command(label="✏️ Edit Selected", command=lambda: self.open_multiple_edit())
+        self.tree.bind("<Button-3>", self.show_right_menu)
+        self.tree.bind("<Double-1>", self.open_single_edit)
 
     # ==========================================
-    # LOGICA: MENU TASTO DESTRO E PATH
+    # LOGIC: RIGHT CLICK MENU AND PATH
     # ==========================================
-    def mostra_menu_destro(self, event):
+    def show_right_menu(self, event):
         if self.tree.selection():
-            self.menu_destro.tk_popup(event.x_root, event.y_root)
+            self.right_menu.tk_popup(event.x_root, event.y_root)
 
-    def tronca_percorso(self, path_str):
+    def truncate_path(self, path_str):
         if not path_str: return ""
         p_str = str(path_str).replace("/", "\\")
         parts = p_str.split("\\")
@@ -250,309 +250,303 @@ class NavigatoreSQLiteApp:
         return p_str
 
     # ==========================================
-    # LOGICA: CONNESSIONE AL DATABASE SQLITE
+    # LOGIC: SQLITE DATABASE CONNECTION
     # ==========================================
-    def carica_db(self):
-        # FIX: Aggiunto parent=self.root
-        file_path = filedialog.askopenfilename(parent=self.root, filetypes=[("Database SQLite", "*.db")])
+    def load_db(self):
+        file_path = filedialog.askopenfilename(parent=self.root, filetypes=[("SQLite Database", "*.db")])
         if not file_path: return
 
-        self.imposta_caricamento(True, "⏳ Caricamento Database in corso...")
+        self.set_loading(True, "⏳ Loading Database...")
         try:
             self.file_path_db = file_path
             conn = sqlite3.connect(file_path)
-            self.df_completo = pd.read_sql_query("SELECT * FROM misurazioni", conn)
+            self.df_complete = pd.read_sql_query("SELECT * FROM misurazioni", conn)
             conn.close()
 
-            self.df_completo = self.df_completo.fillna("")
+            self.df_complete = self.df_complete.fillna("")
             for col in ['codice_pezzo', 'lotto', 'sezione', 'nome_misura', 'stato', 'fase']:
-                if col in self.df_completo.columns:
-                    self.df_completo[col] = self.df_completo[col].astype(str).str.strip()
+                if col in self.df_complete.columns:
+                    self.df_complete[col] = self.df_complete[col].astype(str).str.strip()
 
-            self.df_filtrato = self.df_completo.copy()
-            self.codice_corrente = None  # Reset sicurezza
+            self.df_filtered = self.df_complete.copy()
+            self.current_code = None  # Security reset
 
-            self.inizializza_checkbox_colonne()
-            self.costruisci_tabella()
-            self.inizializza_filtri()
-            self.applica_filtri()
+            self.initialize_column_checkboxes()
+            self.build_table()
+            self.initialize_filters()
+            self.apply_filters()
 
         except Exception as e:
-            # FIX: Aggiunto parent=self.root
-            messagebox.showerror("Errore DB", f"Impossibile leggere il database:\n{str(e)}", parent=self.root)
+            messagebox.showerror("DB Error", f"Unable to read the database:\n{str(e)}", parent=self.root)
         finally:
-            self.imposta_caricamento(False)
-            if not self.df_completo.empty:
-                self.lbl_file.config(text=f"📂 {Path(file_path).name} ({len(self.df_completo)} misurazioni)")
+            self.set_loading(False)
+            if not self.df_complete.empty:
+                self.lbl_file.config(text=f"📂 {Path(file_path).name} ({len(self.df_complete)} measurements)")
 
     # ==========================================
-    # LOGICA: VISIBILITÀ COLONNE E MISURE
+    # LOGIC: COLUMNS AND MEASURES VISIBILITY
     # ==========================================
-    def inizializza_checkbox_colonne(self):
-        for widget in self.inner_frame_visibilita.winfo_children():
+    def initialize_column_checkboxes(self):
+        for widget in self.inner_frame_visibility.winfo_children():
             widget.destroy()
-        self.colonne_visibili_vars.clear()
+        self.visible_columns_vars.clear()
 
-        for col in self.df_completo.columns:
+        for col in self.df_complete.columns:
             var = tk.BooleanVar(value=True)
             if col == 'id': var.set(False)
 
-            testo_chk = self.get_nome_visivo(col)
-            chk = tk.Checkbutton(self.inner_frame_visibilita, text=testo_chk, bg="#ecf0f1", activebackground="#ecf0f1",
-                                 variable=var, command=self.aggiorna_colonne_visibili)
+            check_text = self.get_visual_name(col)
+            chk = tk.Checkbutton(self.inner_frame_visibility, text=check_text, bg="#ecf0f1", activebackground="#ecf0f1",
+                                 variable=var, command=self.update_visible_columns)
             chk.pack(anchor="w")
-            self.colonne_visibili_vars[col] = var
+            self.visible_columns_vars[col] = var
 
         self.frame_left.update_idletasks()
         self.canvas_left.configure(scrollregion=self.canvas_left.bbox("all"))
 
-    def aggiorna_colonne_visibili(self):
-        colonne_attive = [col for col, var in self.colonne_visibili_vars.items() if var.get()]
-        if not colonne_attive: colonne_attive = ['id']
-        self.tree["displaycolumns"] = colonne_attive
+    def update_visible_columns(self):
+        active_columns = [col for col, var in self.visible_columns_vars.items() if var.get()]
+        if not active_columns: active_columns = ['id']
+        self.tree["displaycolumns"] = active_columns
 
-    def costruisci_filtri_misure(self, codice):
-        for widget in self.inner_frame_misure.winfo_children():
+    def build_measure_filters(self, code):
+        for widget in self.inner_frame_measures.winfo_children():
             widget.destroy()
-        self.misure_visibili_vars.clear()
+        self.visible_measures_vars.clear()
 
-        misure_uniche = sorted(self.df_completo[self.df_completo['codice_pezzo'].astype(str).str.upper() == codice][
+        unique_measures = sorted(self.df_complete[self.df_complete['codice_pezzo'].astype(str).str.upper() == code][
                                    'nome_misura'].unique())
 
-        for mis in misure_uniche:
+        for meas in unique_measures:
             var = tk.BooleanVar(value=True)
-            chk = tk.Checkbutton(self.inner_frame_misure, text=mis, variable=var, bg="#ecf0f1",
-                                 activebackground="#ecf0f1", command=self.applica_filtri)
+            chk = tk.Checkbutton(self.inner_frame_measures, text=meas, variable=var, bg="#ecf0f1",
+                                 activebackground="#ecf0f1", command=self.apply_filters)
             chk.pack(anchor="w")
-            self.misure_visibili_vars[mis] = var
+            self.visible_measures_vars[meas] = var
 
-        self.lbl_stato_misure.config(text=f"Misure del codice:", fg="#2c3e50", font=("Arial", 9, "bold"))
-        self.btn_rinomina_misura.config(state="normal")
-        self.btn_toggle_misure.config(state="normal")
+        self.lbl_measures_status.config(text=f"Measures for code:", fg="#2c3e50", font=("Arial", 9, "bold"))
+        self.btn_rename_measure.config(state="normal")
+        self.btn_toggle_measures.config(state="normal")
 
         self.frame_left.update_idletasks()
         self.canvas_left.configure(scrollregion=self.canvas_left.bbox("all"))
         self.canvas_left.yview_moveto(0)
 
-    def svuota_filtri_misure(self):
-        for widget in self.inner_frame_misure.winfo_children(): widget.destroy()
-        self.misure_visibili_vars.clear()
-        self.lbl_stato_misure.config(text="Seleziona un CODICE", fg="#7f8c8d", font=("Arial", 9, "italic"))
-        self.btn_rinomina_misura.config(state="disabled")
-        self.btn_toggle_misure.config(state="disabled")
+    def clear_measure_filters(self):
+        for widget in self.inner_frame_measures.winfo_children(): widget.destroy()
+        self.visible_measures_vars.clear()
+        self.lbl_measures_status.config(text="Select a CODE", fg="#7f8c8d", font=("Arial", 9, "italic"))
+        self.btn_rename_measure.config(state="disabled")
+        self.btn_toggle_measures.config(state="disabled")
 
         self.frame_left.update_idletasks()
         self.canvas_left.configure(scrollregion=self.canvas_left.bbox("all"))
 
-    def toggle_misure(self):
-        if not self.misure_visibili_vars: return
-        attuali = [var.get() for var in self.misure_visibili_vars.values()]
-        nuovo_stato = not all(attuali)
-        for var in self.misure_visibili_vars.values():
-            var.set(nuovo_stato)
-        self.applica_filtri()
+    def toggle_measures(self):
+        if not self.visible_measures_vars: return
+        current_states = [var.get() for var in self.visible_measures_vars.values()]
+        new_state = not all(current_states)
+        for var in self.visible_measures_vars.values():
+            var.set(new_state)
+        self.apply_filters()
 
     # ==========================================
-    # LOGICA: RINOMINA MISURA GLOBALE
+    # LOGIC: GLOBAL MEASURE RENAME
     # ==========================================
-    def apri_rinomina_misura(self):
-        if not self.codice_corrente: return
+    def open_rename_measure(self):
+        if not self.current_code: return
 
-        misure_attuali = list(self.misure_visibili_vars.keys())
-        if not misure_attuali: return
+        current_measures = list(self.visible_measures_vars.keys())
+        if not current_measures: return
 
         popup = tk.Toplevel(self.root)
-        popup.title("Rinomina Misura (Azione Globale sul DB)")
+        popup.title("Rename Measure (Global DB Action)")
         popup.geometry("450x300")
         popup.configure(bg="#ecf0f1")
         popup.transient(self.root)
         popup.grab_set()
 
-        tk.Label(popup, text=f"Codice selezionato: {self.codice_corrente}", font=("Arial", 11, "bold"),
+        tk.Label(popup, text=f"Selected Code: {self.current_code}", font=("Arial", 11, "bold"),
                  bg="#ecf0f1").pack(pady=15)
 
-        tk.Label(popup, text="Scegli la misura da correggere:", bg="#ecf0f1", font=("Arial", 10)).pack(pady=(5, 0))
-        combo_misure = ttk.Combobox(popup, values=misure_attuali, state="readonly", width=40, font=("Arial", 10))
-        combo_misure.pack(pady=5)
-        combo_misure.current(0)
+        tk.Label(popup, text="Choose the measure to fix:", bg="#ecf0f1", font=("Arial", 10)).pack(pady=(5, 0))
+        combo_measures = ttk.Combobox(popup, values=current_measures, state="readonly", width=40, font=("Arial", 10))
+        combo_measures.pack(pady=5)
+        combo_measures.current(0)
 
-        tk.Label(popup, text="Nuovo nome misura:", bg="#ecf0f1", font=("Arial", 10)).pack(pady=(15, 0))
-        entry_nuovo = tk.Entry(popup, width=43, font=("Arial", 10))
-        entry_nuovo.pack(pady=5)
+        tk.Label(popup, text="New measure name:", bg="#ecf0f1", font=("Arial", 10)).pack(pady=(15, 0))
+        entry_new = tk.Entry(popup, width=43, font=("Arial", 10))
+        entry_new.pack(pady=5)
 
-        def salva_rinomina():
-            vecchio_nome = combo_misure.get()
-            nuovo_nome = entry_nuovo.get().strip()
+        def save_rename():
+            old_name = combo_measures.get()
+            new_name = entry_new.get().strip()
 
-            if not nuovo_nome or vecchio_nome == nuovo_nome: return
+            if not new_name or old_name == new_name: return
 
-            self.imposta_caricamento(True, "⏳ Modifica in blocco nel Database...")
+            self.set_loading(True, "⏳ Batch modifying Database...")
             popup.destroy()
 
             try:
                 conn = sqlite3.connect(self.file_path_db)
                 cur = conn.cursor()
                 cur.execute("UPDATE misurazioni SET nome_misura = ? WHERE UPPER(codice_pezzo) = ? AND nome_misura = ?",
-                            (nuovo_nome, self.codice_corrente, vecchio_nome))
-                righe_coinvolte = cur.rowcount
+                            (new_name, self.current_code, old_name))
+                rows_involved = cur.rowcount
                 conn.commit()
                 conn.close()
 
-                mask = (self.df_completo['codice_pezzo'].astype(str).str.upper() == self.codice_corrente) & (
-                            self.df_completo['nome_misura'] == vecchio_nome)
-                self.df_completo.loc[mask, 'nome_misura'] = nuovo_nome
+                mask = (self.df_complete['codice_pezzo'].astype(str).str.upper() == self.current_code) & (
+                            self.df_complete['nome_misura'] == old_name)
+                self.df_complete.loc[mask, 'nome_misura'] = new_name
 
-                self.codice_corrente = None
-                self.applica_filtri()
+                self.current_code = None
+                self.apply_filters()
 
-                # FIX: Aggiunto parent=self.root dato che il popup è già distrutto
-                messagebox.showinfo("Successo",
-                                    f"✅ Misura rinominata con successo!\n\nDa: '{vecchio_nome}'\nA: '{nuovo_nome}'\nRighe modificate: {righe_coinvolte}",
+                messagebox.showinfo("Success",
+                                    f"✅ Measure successfully renamed!\n\nFrom: '{old_name}'\nTo: '{new_name}'\nModified rows: {rows_involved}",
                                     parent=self.root)
 
             except Exception as e:
-                # FIX: Aggiunto parent=self.root
-                messagebox.showerror("Errore Salvataggio", f"Errore durante l'aggiornamento del DB:\n{str(e)}",
+                messagebox.showerror("Save Error", f"Error while updating DB:\n{str(e)}",
                                      parent=self.root)
             finally:
-                self.imposta_caricamento(False)
+                self.set_loading(False)
 
-        tk.Button(popup, text="⚠️ Modifica su tutto il Database", command=salva_rinomina, bg="#c0392b", fg="white",
+        tk.Button(popup, text="⚠️ Modify across whole Database", command=save_rename, bg="#c0392b", fg="white",
                   font=("Arial", 10, "bold"), bd=0, padx=15, pady=6).pack(pady=25)
 
     # ==========================================
-    # LOGICA: MODIFICA SINGOLA E MULTIPLA A GRIGLIA
+    # LOGIC: SINGLE AND MULTIPLE GRID EDIT
     # ==========================================
-    def apri_modifica_singola(self, event):
+    def open_single_edit(self, event):
         region = self.tree.identify("region", event.x, event.y)
         if region != "cell": return
-        item_cliccato = self.tree.identify_row(event.y)
-        if not item_cliccato: return
-        self._esegui_modifica([item_cliccato])
+        clicked_item = self.tree.identify_row(event.y)
+        if not clicked_item: return
+        self._execute_edit([clicked_item])
 
-    def apri_modifica_multipla(self, event=None):
-        selezione = self.tree.selection()
-        if not selezione: return
-        self._esegui_modifica(selezione)
+    def open_multiple_edit(self, event=None):
+        selection = self.tree.selection()
+        if not selection: return
+        self._execute_edit(selection)
 
-    def _esegui_modifica(self, lista_items):
-        colonne = list(self.df_completo.columns)
-        if 'id' not in colonne:
-            messagebox.showerror("Errore", "La colonna 'id' (Primary Key) è mancante. Impossibile aggiornare il DB.",
+    def _execute_edit(self, items_list):
+        columns = list(self.df_complete.columns)
+        if 'id' not in columns:
+            messagebox.showerror("Error", "The 'id' column (Primary Key) is missing. Unable to update DB.",
                                  parent=self.root)
             return
 
-        id_idx = colonne.index('id')
-        ids_da_modificare = [str(self.tree.item(item, "values")[id_idx]) for item in lista_items]
+        id_idx = columns.index('id')
+        ids_to_modify = [str(self.tree.item(item, "values")[id_idx]) for item in items_list]
 
-        valori_prima_riga = self.tree.item(lista_items[0], "values")
+        first_row_values = self.tree.item(items_list[0], "values")
 
         popup = tk.Toplevel(self.root)
-        titolo_popup = f"Modifica Multipla ({len(lista_items)} righe selezionate)" if len(
-            lista_items) > 1 else "Modifica Singola Riga"
-        popup.title(titolo_popup)
+        popup_title = f"Multiple Edit ({len(items_list)} selected rows)" if len(
+            items_list) > 1 else "Single Row Edit"
+        popup.title(popup_title)
         popup.geometry("600x480")
         popup.configure(bg="#ecf0f1")
         popup.transient(self.root)
         popup.grab_set()
 
-        msg = "Sovrascrivi i campi che desideri aggiornare.\nI campi lasciati IN GRIGIO non verranno modificati."
+        msg = "Overwrite the fields you wish to update.\nFields left IN GRAY will not be modified."
         tk.Label(popup, text=msg, bg="#fff9c4", fg="#333", font=("Arial", 9), pady=10).pack(fill="x")
 
         frame_form = tk.Frame(popup, padx=20, pady=10, bg="#ecf0f1")
         frame_form.pack(fill="both", expand=True)
 
-        campi_protetti = ['id', 'file_pdf', 'cartella_padre', 'misurato_mm', 'nominale_mm', 'tolleranza_piu',
+        protected_fields = ['id', 'file_pdf', 'cartella_padre', 'misurato_mm', 'nominale_mm', 'tolleranza_piu',
                           'tolleranza_meno', 'deviazione']
-        campi_modificabili = [c for c in colonne if c not in campi_protetti]
+        editable_fields = [c for c in columns if c not in protected_fields]
 
         entry_dict = {}
 
-        def attiva_campo(event):
+        def activate_field(event):
             widget = event.widget
             if widget.cget("fg") == "gray" and event.keysym not in ("Tab", "Shift_L", "Shift_R", "Return"):
                 widget.config(fg="black")
 
-        for riga_idx, col in enumerate(campi_modificabili):
-            col_idx = colonne.index(col)
-            val_originale = valori_prima_riga[col_idx]
+        for row_idx, col in enumerate(editable_fields):
+            col_idx = columns.index(col)
+            original_val = first_row_values[col_idx]
 
-            testo_label = self.get_nome_visivo(col).upper() + ":"
-            tk.Label(frame_form, text=testo_label, font=("Arial", 10, "bold"), bg="#ecf0f1").grid(row=riga_idx,
+            label_text = self.get_visual_name(col).upper() + ":"
+            tk.Label(frame_form, text=label_text, font=("Arial", 10, "bold"), bg="#ecf0f1").grid(row=row_idx,
                                                                                                   column=0, sticky="e",
                                                                                                   pady=8, padx=10)
 
             entry = tk.Entry(frame_form, width=40, font=("Arial", 10))
-            entry.grid(row=riga_idx, column=1, sticky="w", pady=8)
+            entry.grid(row=row_idx, column=1, sticky="w", pady=8)
 
-            entry.insert(0, str(val_originale))
+            entry.insert(0, str(original_val))
             entry.config(fg="gray")
 
-            entry.bind("<Key>", attiva_campo)
+            entry.bind("<Key>", activate_field)
             entry.bind("<<Paste>>", lambda e, w=entry: w.config(fg="black"))
 
             entry_dict[col] = entry
 
-        def salva_modifiche():
-            campi_da_aggiornare = {}
+        def save_changes():
+            fields_to_update = {}
             for col, entry in entry_dict.items():
                 if entry.cget("fg") == "black":
-                    campi_da_aggiornare[col] = entry.get().strip()
+                    fields_to_update[col] = entry.get().strip()
 
-            if not campi_da_aggiornare:
+            if not fields_to_update:
                 popup.destroy()
                 return
 
-            self.imposta_caricamento(True, "⏳ Salvataggio modifiche nel Database...")
+            self.set_loading(True, "⏳ Saving changes to Database...")
             popup.destroy()
 
             try:
                 conn = sqlite3.connect(self.file_path_db)
                 cur = conn.cursor()
 
-                set_clause = ", ".join([f"{c} = ?" for c in campi_da_aggiornare.keys()])
-                valori = list(campi_da_aggiornare.values())
+                set_clause = ", ".join([f"{c} = ?" for c in fields_to_update.keys()])
+                values = list(fields_to_update.values())
 
-                placeholders = ','.join('?' for _ in ids_da_modificare)
+                placeholders = ','.join('?' for _ in ids_to_modify)
                 query = f"UPDATE misurazioni SET {set_clause} WHERE id IN ({placeholders})"
 
-                cur.execute(query, valori + ids_da_modificare)
+                cur.execute(query, values + ids_to_modify)
                 conn.commit()
                 conn.close()
 
-                for col, val in campi_da_aggiornare.items():
-                    self.df_completo.loc[self.df_completo['id'].astype(str).isin(ids_da_modificare), col] = val
+                for col, val in fields_to_update.items():
+                    self.df_complete.loc[self.df_complete['id'].astype(str).isin(ids_to_modify), col] = val
 
-                self.applica_filtri()
+                self.apply_filters()
 
-                campi_modificati_belli = [self.get_nome_visivo(c) for c in campi_da_aggiornare.keys()]
-                msg_finale = f"✅ {len(ids_da_modificare)} righe aggiornate con successo nei campi:\n{', '.join(campi_modificati_belli)}"
-                if len(ids_da_modificare) == 1:
-                    msg_finale = f"✅ Riga aggiornata con successo nei campi:\n{', '.join(campi_modificati_belli)}"
+                pretty_modified_fields = [self.get_visual_name(c) for c in fields_to_update.keys()]
+                final_msg = f"✅ {len(ids_to_modify)} rows successfully updated in fields:\n{', '.join(pretty_modified_fields)}"
+                if len(ids_to_modify) == 1:
+                    final_msg = f"✅ Row successfully updated in fields:\n{', '.join(pretty_modified_fields)}"
 
-                # FIX: Aggiunto parent=self.root
-                messagebox.showinfo("Fatto", msg_finale, parent=self.root)
+                messagebox.showinfo("Done", final_msg, parent=self.root)
 
             except Exception as e:
-                # FIX: Aggiunto parent=self.root
-                messagebox.showerror("Errore Salvataggio", f"Errore durante l'aggiornamento del database:\n{str(e)}",
+                messagebox.showerror("Save Error", f"Error during database update:\n{str(e)}",
                                      parent=self.root)
             finally:
-                self.imposta_caricamento(False)
+                self.set_loading(False)
 
-        tk.Button(popup, text="💾 Salva Modifiche", command=salva_modifiche, bg="#27ae60", fg="white",
+        tk.Button(popup, text="💾 Save Changes", command=save_changes, bg="#27ae60", fg="white",
                   font=("Arial", 11, "bold"), bd=0, padx=15, pady=6).pack(pady=20)
 
     # ==========================================
-    # LOGICA: INTERFACCIA TABELLA E FILTRI A CASCATA
+    # LOGIC: TABLE INTERFACE AND CASCADING FILTERS
     # ==========================================
-    def costruisci_tabella(self):
+    def build_table(self):
         self.tree.delete(*self.tree.get_children())
-        self.tree["columns"] = list(self.df_completo.columns)
+        self.tree["columns"] = list(self.df_complete.columns)
         self.tree["show"] = "headings"
 
-        for col in self.df_completo.columns:
-            self.tree.heading(col, text=self.get_nome_visivo(col))
+        for col in self.df_complete.columns:
+            self.tree.heading(col, text=self.get_visual_name(col))
 
             if col == 'id':
                 self.tree.column(col, width=50, anchor="center")
@@ -577,201 +571,197 @@ class NavigatoreSQLiteApp:
             else:
                 self.tree.column(col, width=110, anchor="w")
 
-        self.aggiorna_colonne_visibili()
+        self.update_visible_columns()
 
-    def popola_tabella(self, df):
+    def populate_table(self, df):
         self.tree.delete(*self.tree.get_children())
         df_display = df.head(1000)
 
-        col_list = list(self.df_completo.columns)
+        col_list = list(self.df_complete.columns)
 
         for _, row in df_display.iterrows():
-            valori_riga = []
+            row_values = []
             for col in col_list:
                 val = row[col]
                 if col == 'file_pdf':
-                    val = self.tronca_percorso(val)
-                valori_riga.append(val)
+                    val = self.truncate_path(val)
+                row_values.append(val)
 
-            self.tree.insert("", "end", values=valori_riga)
+            self.tree.insert("", "end", values=row_values)
 
-    def inizializza_filtri(self):
-        for widget in self.frame_filtri_dinamici.winfo_children(): widget.destroy()
-        self.filtri_combo.clear()
+    def initialize_filters(self):
+        for widget in self.frame_dynamic_filters.winfo_children(): widget.destroy()
+        self.combo_filters.clear()
 
-        colonne_per_filtri = ['codice_pezzo', 'fase', 'lotto', 'sezione', 'stato', 'nome_misura']
-        colonne_presenti = [col for col in colonne_per_filtri if col in self.df_completo.columns]
+        columns_for_filters = ['codice_pezzo', 'fase', 'lotto', 'sezione', 'stato', 'nome_misura']
+        present_columns = [col for col in columns_for_filters if col in self.df_complete.columns]
 
-        for col in colonne_presenti:
-            testo_label = self.get_nome_visivo(col).upper()
-            tk.Label(self.frame_filtri_dinamici, text=testo_label, bg="#ecf0f1", font=("Arial", 9, "bold")).pack(
+        for col in present_columns:
+            label_text = self.get_visual_name(col).upper()
+            tk.Label(self.frame_dynamic_filters, text=label_text, bg="#ecf0f1", font=("Arial", 9, "bold")).pack(
                 anchor="w", pady=(5, 0))
 
-            combo = ttk.Combobox(self.frame_filtri_dinamici, state="normal")
+            combo = ttk.Combobox(self.frame_dynamic_filters, state="normal")
             combo.pack(fill="x")
 
-            combo.bind("<<ComboboxSelected>>", lambda e: self.applica_filtri())
-            combo.bind("<Return>", lambda e: self.applica_filtri())
+            combo.bind("<<ComboboxSelected>>", lambda e: self.apply_filters())
+            combo.bind("<Return>", lambda e: self.apply_filters())
 
-            self.filtri_combo[col] = combo
+            self.combo_filters[col] = combo
 
-    def reset_filtri(self):
-        for combo in self.filtri_combo.values():
-            combo.set("TUTTI")
-        self.applica_filtri()
+    def reset_filters(self):
+        for combo in self.combo_filters.values():
+            combo.set("ALL")
+        self.apply_filters()
 
-    def applica_filtri(self, event=None):
-        if self.df_completo.empty: return
+    def apply_filters(self, event=None):
+        if self.df_complete.empty: return
 
-        self.imposta_caricamento(True, "⏳ Applicazione filtri in corso...")
+        self.set_loading(True, "⏳ Applying filters...")
         try:
-            df = self.df_completo.copy()
+            df = self.df_complete.copy()
 
-            filtri_attivi = {}
-            for col, combo in self.filtri_combo.items():
+            active_filters = {}
+            for col, combo in self.combo_filters.items():
                 val = combo.get().strip().upper()
-                if val and val != "TUTTI":
-                    filtri_attivi[col] = val
+                if val and val != "ALL":
+                    active_filters[col] = val
                     df = df[df[col].astype(str).str.upper() == val]
 
-            cod_selezionato = "TUTTI"
-            if 'codice_pezzo' in self.filtri_combo:
-                cod_selezionato = self.filtri_combo['codice_pezzo'].get().strip().upper()
+            selected_code = "ALL"
+            if 'codice_pezzo' in self.combo_filters:
+                selected_code = self.combo_filters['codice_pezzo'].get().strip().upper()
 
-            if cod_selezionato and cod_selezionato != "TUTTI":
-                if self.codice_corrente != cod_selezionato:
-                    self.codice_corrente = cod_selezionato
-                    self.costruisci_filtri_misure(cod_selezionato)
+            if selected_code and selected_code != "ALL":
+                if self.current_code != selected_code:
+                    self.current_code = selected_code
+                    self.build_measure_filters(selected_code)
 
-                misure_attive = [m for m, var in self.misure_visibili_vars.items() if var.get()]
+                active_measures = [m for m, var in self.visible_measures_vars.items() if var.get()]
 
-                if len(misure_attive) < len(self.misure_visibili_vars):
-                    df = df[df['nome_misura'].isin(misure_attive)]
+                if len(active_measures) < len(self.visible_measures_vars):
+                    df = df[df['nome_misura'].isin(active_measures)]
             else:
-                if self.codice_corrente is not None:
-                    self.codice_corrente = None
-                    self.svuota_filtri_misure()
+                if self.current_code is not None:
+                    self.current_code = None
+                    self.clear_measure_filters()
 
-            self.df_filtrato = df
-            self.popola_tabella(self.df_filtrato)
-            self.aggiorna_statistiche()
+            self.df_filtered = df
+            self.populate_table(self.df_filtered)
+            self.update_statistics()
 
-            for col, combo in self.filtri_combo.items():
-                valore_attuale = combo.get().strip().upper()
+            for col, combo in self.combo_filters.items():
+                current_value = combo.get().strip().upper()
 
-                df_temp = self.df_completo.copy()
-                for c_attivo, v_attivo in filtri_attivi.items():
-                    if c_attivo != col:
-                        df_temp = df_temp[df_temp[c_attivo].astype(str).str.upper() == v_attivo]
+                df_temp = self.df_complete.copy()
+                for c_active, v_active in active_filters.items():
+                    if c_active != col:
+                        df_temp = df_temp[df_temp[c_active].astype(str).str.upper() == v_active]
 
-                nuove_opzioni = ["TUTTI"] + sorted([str(x) for x in df_temp[col].unique() if str(x) != ""])
-                combo['values'] = nuove_opzioni
+                new_options = ["ALL"] + sorted([str(x) for x in df_temp[col].unique() if str(x) != ""])
+                combo['values'] = new_options
 
-                if not valore_attuale or valore_attuale == "TUTTI":
-                    combo.set("TUTTI")
-                elif valore_attuale in [opt.upper() for opt in nuove_opzioni]:
-                    combo.set(valore_attuale)
+                if not current_value or current_value == "ALL":
+                    combo.set("ALL")
+                elif current_value in [opt.upper() for opt in new_options]:
+                    combo.set(current_value)
                 else:
-                    combo.set("TUTTI")
+                    combo.set("ALL")
 
         finally:
-            self.imposta_caricamento(False)
-            avviso = f" (Mostrate prime 1000)" if len(self.df_filtrato) > 1000 else ""
+            self.set_loading(False)
+            warning = f" (Showing first 1000)" if len(self.df_filtered) > 1000 else ""
 
-            nome_file = Path(self.file_path_db).name if self.file_path_db else "Sconosciuto"
-            self.lbl_file.config(text=f"📂 {nome_file} - Trovate: {len(self.df_filtrato)} righe{avviso}")
+            file_name = Path(self.file_path_db).name if self.file_path_db else "Unknown"
+            self.lbl_file.config(text=f"📂 {file_name} - Found: {len(self.df_filtered)} rows{warning}")
 
     # ==========================================
-    # LOGICA: STATISTICHE AVANZATE SU MISURA
+    # LOGIC: ADVANCED CUSTOM STATISTICS
     # ==========================================
-    def aggiorna_statistiche(self):
-        self.testo_statistiche.config(state="normal")
-        self.testo_statistiche.delete(1.0, tk.END)
+    def update_statistics(self):
+        self.text_statistics.config(state="normal")
+        self.text_statistics.delete(1.0, tk.END)
 
-        df = self.df_filtrato
+        df = self.df_filtered
         if df.empty:
-            self.testo_statistiche.insert(tk.END, "Nessuna misurazione corrispondente ai filtri.")
-            self.testo_statistiche.config(state="disabled")
+            self.text_statistics.insert(tk.END, "No measurements matching the filters.")
+            self.text_statistics.config(state="disabled")
             return
 
-        statistiche = []
-        statistiche.append(f"📌 TOTALE MISURAZIONI: {len(df)}\n")
+        statistics = []
+        statistics.append(f"📌 TOTAL MEASUREMENTS: {len(df)}\n")
 
         if 'file_pdf' in df.columns:
-            totale_pezzi = df['file_pdf'].nunique()
-            statistiche.append(f"📄 TOTALE PEZZI (PDF): {totale_pezzi}\n")
+            total_parts = df['file_pdf'].nunique()
+            statistics.append(f"📄 TOTAL PARTS (PDF): {total_parts}\n")
         else:
-            statistiche.append("\n")
+            statistics.append("\n")
 
-        statistiche.append("-" * 35 + "\n")
+        statistics.append("-" * 35 + "\n")
 
         if 'codice_pezzo' in df.columns:
-            statistiche.append(f"📦 CODICI UNICI: {df['codice_pezzo'].nunique()}\n")
+            statistics.append(f"📦 UNIQUE CODES: {df['codice_pezzo'].nunique()}\n")
             if 'lotto' in df.columns:
-                statistiche.append("🏷️ LOTTI PER CODICE PEZZO:")
+                statistics.append("🏷️ BATCHES PER PART CODE:")
                 for cod, count in df.groupby('codice_pezzo')['lotto'].nunique().items():
-                    statistiche.append(f"  • {cod if cod else '[Nessun Codice]'}: {count} lotti")
-                statistiche.append("\n")
+                    statistics.append(f"  • {cod if cod else '[No Code]'}: {count} batches")
+                statistics.append("\n")
 
                 if 'fase' in df.columns:
-                    statistiche.append("⚙️ LOTTI PER CODICE E FASE:")
-                    for (cod, fase), count in df.groupby(['codice_pezzo', 'fase'])['lotto'].nunique().items():
-                        statistiche.append(
-                            f"  • {cod if cod else '[No Cod]'} | {fase if fase else '[No Fase]'}: {count} lotti")
-                    statistiche.append("\n")
+                    statistics.append("⚙️ BATCHES PER CODE AND PHASE:")
+                    for (cod, phase), count in df.groupby(['codice_pezzo', 'fase'])['lotto'].nunique().items():
+                        statistics.append(
+                            f"  • {cod if cod else '[No Code]'} | {phase if phase else '[No Phase]'}: {count} batches")
+                    statistics.append("\n")
 
         if 'file_pdf' in df.columns and 'stato' in df.columns:
-            statistiche.append("-" * 35)
-            statistiche.append("\n⚖️ QUALITÀ SUI PEZZI (PDF FISICI):")
-            pdf_scartati = df[df['stato'].str.upper() == 'NON OK']['file_pdf'].nunique()
-            pdf_ok = totale_pezzi - pdf_scartati
+            statistics.append("-" * 35)
+            statistics.append("\n⚖️ QUALITY ON PARTS (PHYSICAL PDFs):")
+            rejected_pdfs = df[df['stato'].str.upper() == 'NON OK']['file_pdf'].nunique()
+            ok_pdfs = total_parts - rejected_pdfs
 
-            perc_ok = (pdf_ok / totale_pezzi) * 100 if totale_pezzi > 0 else 0
-            perc_ko = (pdf_scartati / totale_pezzi) * 100 if totale_pezzi > 0 else 0
+            perc_ok = (ok_pdfs / total_parts) * 100 if total_parts > 0 else 0
+            perc_ko = (rejected_pdfs / total_parts) * 100 if total_parts > 0 else 0
 
-            statistiche.append(f"  - Pezzi a posto: {pdf_ok} ({perc_ok:.1f}%)")
-            statistiche.append(f"  - Pezzi da scartare: {pdf_scartati} ({perc_ko:.1f}%)\n")
+            statistics.append(f"  - OK Parts: {ok_pdfs} ({perc_ok:.1f}%)")
+            statistics.append(f"  - Scrap Parts: {rejected_pdfs} ({perc_ko:.1f}%)\n")
 
         if 'stato' in df.columns:
-            statistiche.append("-" * 35)
-            statistiche.append("\n🔬 QUALITÀ SULLE SINGOLE MISURE:")
-            for stato, count in df['stato'].value_counts().items():
-                if stato.strip() == "": stato = "NON VALUTATO"
-                statistiche.append(f"  - {stato}: {count} ({(count / len(df)) * 100:.1f}%)")
+            statistics.append("-" * 35)
+            statistics.append("\n🔬 QUALITY ON INDIVIDUAL MEASURES:")
+            for status, count in df['stato'].value_counts().items():
+                if status.strip() == "": status = "NOT EVALUATED"
+                statistics.append(f"  - {status}: {count} ({(count / len(df)) * 100:.1f}%)")
 
-        self.testo_statistiche.insert(tk.END, "\n".join(statistiche))
-        self.testo_statistiche.config(state="disabled")
+        self.text_statistics.insert(tk.END, "\n".join(statistics))
+        self.text_statistics.config(state="disabled")
 
     # ==========================================
-    # LOGICA: ESPORTAZIONE
+    # LOGIC: EXPORT
     # ==========================================
-    def esporta_dati(self):
-        if self.df_filtrato.empty:
-            # FIX: Aggiunto parent=self.root
-            return messagebox.showinfo("Vuoto", "Non ci sono dati da esportare.", parent=self.root)
+    def export_data(self):
+        if self.df_filtered.empty:
+            return messagebox.showinfo("Empty", "No data to export.", parent=self.root)
 
-        df_export = self.df_filtrato.drop(columns=['id'], errors='ignore')
-        df_export = df_export.rename(columns=self.nomi_display)
+        df_export = self.df_filtered.drop(columns=['id'], errors='ignore')
+        df_export = df_export.rename(columns=self.display_names)
 
-        # FIX: Aggiunto parent=self.root
         file_path = filedialog.asksaveasfilename(parent=self.root, defaultextension=".xlsx",
                                                  filetypes=[("Excel Files", "*.xlsx"), ("CSV Files", "*.csv")])
 
         if file_path:
-            self.imposta_caricamento(True, "⏳ Generazione file in corso...")
+            self.set_loading(True, "⏳ Generating file...")
             try:
                 if file_path.endswith('.csv'):
                     df_export.to_csv(file_path, index=False, sep=";")
                 else:
                     df_export.to_excel(file_path, index=False)
-                # FIX: Aggiunto parent=self.root
-                messagebox.showinfo("Successo", f"Dati esportati correttamente in:\n{Path(file_path).name}",
+                messagebox.showinfo("Success", f"Data successfully exported to:\n{Path(file_path).name}",
                                     parent=self.root)
             except Exception as e:
-                # FIX: Aggiunto parent=self.root
-                messagebox.showerror("Errore", f"Impossibile salvare il file:\n{str(e)}", parent=self.root)
+                messagebox.showerror("Error", f"Unable to save the file:\n{str(e)}", parent=self.root)
             finally:
-                self.imposta_caricamento(False)
+                self.set_loading(False)
 
 
 if __name__ == "__main__":
@@ -780,5 +770,5 @@ if __name__ == "__main__":
     except Exception:
         pass
     root = tk.Tk()
-    app = NavigatoreSQLiteApp(root)
+    app = SQLiteNavigatorApp(root)
     root.mainloop()
