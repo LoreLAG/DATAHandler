@@ -14,7 +14,7 @@ from datetime import datetime
 import ctypes
 
 # ==========================================
-# 1. CONFIGURAZIONE E REGEX
+# 1. CONFIGURATION AND REGEX
 # ==========================================
 logging.getLogger("PyPDF2").setLevel(logging.ERROR)
 
@@ -24,54 +24,54 @@ PATTERN_LOTTO = re.compile(r"(?<![A-Za-z0-9])([A-Za-z0-9]{6})(?![A-Za-z0-9])")
 
 
 # ==========================================
-# 2. FUNZIONE DI ESTRAZIONE
+# 2. EXTRACTION FUNCTION
 # ==========================================
-def estrai_lotto_pdf(percorso_pdf: Path) -> Optional[str]:
+def extract_batch_pdf(pdf_path: Path) -> Optional[str]:
     try:
-        reader = PdfReader(percorso_pdf)
+        reader = PdfReader(pdf_path)
         if not reader.pages: return None
-        testo_pagina = reader.pages[0].extract_text()
-        if not testo_pagina: return None
+        page_text = reader.pages[0].extract_text()
+        if not page_text: return None
 
-        codice = re.split(r"[_\s-]+", percorso_pdf.stem)[0]
-        match_order = RECINTO_ORDER.search(testo_pagina)
-        match_ident = RECINTO_IDENT.search(testo_pagina)
+        code = re.split(r"[_\s-]+", pdf_path.stem)[0]
+        match_order = RECINTO_ORDER.search(page_text)
+        match_ident = RECINTO_IDENT.search(page_text)
 
-        frammenti = []
-        if match_ident: frammenti.append(match_ident.group(1))
-        if match_order: frammenti.append(match_order.group(1))
+        fragments = []
+        if match_ident: fragments.append(match_ident.group(1))
+        if match_order: fragments.append(match_order.group(1))
 
-        for frammento in frammenti:
-            possibili_lotti = PATTERN_LOTTO.findall(frammento)
-            for candidato in possibili_lotti:
-                candidato = candidato.upper()
-                if candidato == codice.upper():
+        for fragment in fragments:
+            possible_batches = PATTERN_LOTTO.findall(fragment)
+            for candidate in possible_batches:
+                candidate = candidate.upper()
+                if candidate == code.upper():
                     continue
-                if any(c.isalpha() for c in candidato) and any(c.isdigit() for c in candidato):
-                    return candidato
+                if any(c.isalpha() for c in candidate) and any(c.isdigit() for c in candidate):
+                    return candidate
         return None
     except Exception:
         return None
 
 
 # ==========================================
-# 3. INTERFACCIA GRAFICA (GUI)
+# 3. GRAPHICAL USER INTERFACE (GUI)
 # ==========================================
 class CalypsoRenamerApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Sistema di Battesimo Report Calypso (Pro Edition)")
+        self.root.title("Calypso Report Renaming System (Pro Edition)")
         self.root.geometry("1100x750")
         self.root.minsize(900, 600)
         self.root.configure(bg="#ecf0f1")
 
-        # Variabili di stato
-        self.percorso_radice = tk.StringVar()
-        self.modalita_simulazione = tk.BooleanVar(value=True)
+        # State variables
+        self.root_path = tk.StringVar()
+        self.simulation_mode = tk.BooleanVar(value=True)
 
-        # IL SEMAFORO PER IL GRACEFUL SHUTDOWN E MEDIA MOBILE
+        # SEMAPHORE FOR GRACEFUL SHUTDOWN AND MOVING AVERAGE
         self.stop_event = threading.Event()
-        self.finestra_tempi = collections.deque(maxlen=50)
+        self.time_window = collections.deque(maxlen=50)
 
         self.setup_ui()
 
@@ -85,50 +85,50 @@ class CalypsoRenamerApp:
         frame_header = tk.Frame(self.root, pady=15, padx=20, bg="#1c2833")
         frame_header.pack(fill="x", side="top")
 
-        tk.Label(frame_header, text="1. Seleziona Cartella Madre (PDF):", font=("Arial", 11, "bold"), bg="#1c2833",
+        tk.Label(frame_header, text="1. Select Root Folder (PDF):", font=("Arial", 11, "bold"), bg="#1c2833",
                  fg="white", anchor="w").pack(side="left")
-        tk.Entry(frame_header, textvariable=self.percorso_radice, state="readonly", font=("Arial", 10)).pack(
+        tk.Entry(frame_header, textvariable=self.root_path, state="readonly", font=("Arial", 10)).pack(
             side="left", fill="x", expand=True, padx=(10, 10))
 
-        tk.Button(frame_header, text="📂 Sfoglia...", command=self.scegli_cartella, bg="#3498db", fg="white",
+        tk.Button(frame_header, text="📂 Browse...", command=self.choose_folder, bg="#3498db", fg="white",
                   font=("Arial", 10, "bold"), bd=0, padx=15, pady=4).pack(side="right")
 
         # ==========================================
-        # 2. BODY PRINCIPALE
+        # 2. MAIN BODY
         # ==========================================
         frame_body = tk.Frame(self.root, bg="#ecf0f1", padx=20, pady=15)
         frame_body.pack(fill="both", expand=True)
 
-        # --- Sezione Modalità ---
-        frame_mod = tk.LabelFrame(frame_body, text="2. Modalità di Esecuzione", font=("Arial", 10, "bold"),
+        # --- Mode Section ---
+        frame_mode = tk.LabelFrame(frame_body, text="2. Execution Mode", font=("Arial", 10, "bold"),
                                   bg="#ecf0f1", padx=15, pady=10)
-        frame_mod.pack(fill="x", pady=(0, 15))
+        frame_mode.pack(fill="x", pady=(0, 15))
 
-        tk.Radiobutton(frame_mod, text="Simulazione (Crea solo il Log, NESSUN file modificato)",
-                       variable=self.modalita_simulazione, value=True, bg="#ecf0f1", fg="#2980b9",
+        tk.Radiobutton(frame_mode, text="Simulation (Creates Log only, NO files modified)",
+                       variable=self.simulation_mode, value=True, bg="#ecf0f1", fg="#2980b9",
                        font=("Arial", 10, "bold")).pack(anchor="w", pady=2)
-        tk.Radiobutton(frame_mod, text="Operativa Reale (Rinomina FISICAMENTE i file e applica i lotti)",
-                       variable=self.modalita_simulazione, value=False, bg="#ecf0f1", fg="#c0392b",
+        tk.Radiobutton(frame_mode, text="Real Operation (PHYSICALLY renames files and applies batches)",
+                       variable=self.simulation_mode, value=False, bg="#ecf0f1", fg="#c0392b",
                        font=("Arial", 10, "bold")).pack(anchor="w", pady=2)
 
-        # --- Sezione Comandi ---
+        # --- Commands Section ---
         frame_btns = tk.Frame(frame_body, bg="#ecf0f1")
         frame_btns.pack(fill="x", pady=(0, 15))
 
-        self.btn_avvia = tk.Button(frame_btns, text="▶ AVVIA PROCESSO", font=("Arial", 14, "bold"), bg="#27ae60",
-                                   fg="white", height=2, bd=0, command=self.avvia_processo)
-        self.btn_avvia.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        self.btn_start = tk.Button(frame_btns, text="▶ START PROCESS", font=("Arial", 14, "bold"), bg="#27ae60",
+                                   fg="white", height=2, bd=0, command=self.start_process)
+        self.btn_start.pack(side="left", fill="x", expand=True, padx=(0, 10))
 
-        self.btn_stop = tk.Button(frame_btns, text="⏹ FERMA", font=("Arial", 14, "bold"), bg="#c0392b", fg="white",
-                                  height=2, bd=0, state="disabled", command=self.ferma_processo)
+        self.btn_stop = tk.Button(frame_btns, text="⏹ STOP", font=("Arial", 14, "bold"), bg="#c0392b", fg="white",
+                                  height=2, bd=0, state="disabled", command=self.stop_process)
         self.btn_stop.pack(side="right", fill="x", expand=True)
 
-        # --- Sezione Cruscotto Prestazioni ---
-        frame_dash = tk.LabelFrame(frame_body, text="Cruscotto Prestazioni", font=("Arial", 10, "bold"), bg="#ffffff",
+        # --- Performance Dashboard Section ---
+        frame_dash = tk.LabelFrame(frame_body, text="Performance Dashboard", font=("Arial", 10, "bold"), bg="#ffffff",
                                    padx=15, pady=10)
         frame_dash.pack(fill="x", pady=(0, 15))
 
-        self.lbl_status = tk.Label(frame_dash, text="In attesa... pronti per iniziare.", font=("Consolas", 11, "bold"),
+        self.lbl_status = tk.Label(frame_dash, text="Waiting... ready to start.", font=("Consolas", 11, "bold"),
                                    bg="#ffffff", fg="#d35400")
         self.lbl_status.pack(anchor="w", pady=(0, 5))
 
@@ -136,221 +136,216 @@ class CalypsoRenamerApp:
         self.progress_bar = ttk.Progressbar(frame_dash, variable=self.progress_var, maximum=100)
         self.progress_bar.pack(fill="x")
 
-        # --- Sezione Log di Sistema ---
-        frame_log = tk.LabelFrame(frame_body, text="Log di Sistema", font=("Arial", 10, "bold"), bg="#ecf0f1")
+        # --- System Log Section ---
+        frame_log = tk.LabelFrame(frame_body, text="System Log", font=("Arial", 10, "bold"), bg="#ecf0f1")
         frame_log.pack(fill="both", expand=True)
 
         self.log_text = scrolledtext.ScrolledText(frame_log, state='disabled', bg="#1e1e1e", fg="#2ecc71",
                                                   font=("Consolas", 10))
         self.log_text.pack(fill="both", expand=True, padx=2, pady=2)
 
-    def scegli_cartella(self):
-        # FIX: Aggiunto parent=self.root
-        cartella = filedialog.askdirectory(parent=self.root, title="Seleziona la cartella madre")
-        if cartella:
-            self.percorso_radice.set(cartella)
+    def choose_folder(self):
+        folder = filedialog.askdirectory(parent=self.root, title="Select root folder")
+        if folder:
+            self.root_path.set(folder)
 
-    def log(self, messaggio):
+    def log(self, message):
         def append():
             self.log_text.config(state='normal')
-            self.log_text.insert(tk.END, messaggio + "\n")
+            self.log_text.insert(tk.END, message + "\n")
             self.log_text.see(tk.END)
             self.log_text.config(state='disabled')
 
         self.root.after(0, append)
 
-    def update_dashboard(self, percent, testo_status):
+    def update_dashboard(self, percent, status_text):
         def _update():
             self.progress_var.set(percent)
-            self.lbl_status.config(text=testo_status)
+            self.lbl_status.config(text=status_text)
 
         self.root.after(0, _update)
 
-    def avvia_processo(self):
-        cartella = self.percorso_radice.get()
-        if not cartella:
-            # FIX: Aggiunto parent=self.root
-            messagebox.showwarning("Attenzione", "Seleziona prima la cartella contenente i PDF!", parent=self.root)
+    def start_process(self):
+        folder = self.root_path.get()
+        if not folder:
+            messagebox.showwarning("Warning", "Please select the folder containing the PDFs first!", parent=self.root)
             return
 
-        # Prepara la UI per il processing
-        self.stop_event.clear()  # Abbassa il semaforo
-        self.btn_avvia.config(state="disabled", text="ELABORAZIONE IN CORSO...")
-        self.btn_stop.config(state="normal", text="⏹ FERMA")
+        # Prepare UI for processing
+        self.stop_event.clear()  # Lower the semaphore
+        self.btn_start.config(state="disabled", text="PROCESSING IN PROGRESS...")
+        self.btn_stop.config(state="normal", text="⏹ STOP")
 
         self.log_text.config(state='normal')
         self.log_text.delete(1.0, tk.END)
         self.log_text.config(state='disabled')
 
-        # Avvia il thread
-        threading.Thread(target=self.processo_lavoro, args=(Path(cartella),), daemon=True).start()
+        # Start the thread
+        threading.Thread(target=self.work_process, args=(Path(folder),), daemon=True).start()
 
-    def ferma_processo(self):
-        """Alza il semaforo per dire al thread di fermarsi gentilmente."""
-        self.log("\n⚠️ Richiesta di arresto ricevuta... attesa completamento operazione corrente...")
+    def stop_process(self):
+        """Raises the semaphore to tell the thread to stop gracefully."""
+        self.log("\n⚠️ Stop request received... waiting for current operation to complete...")
         self.stop_event.set()
-        self.btn_stop.config(state="disabled", text="ARRESTO IN CORSO...")
+        self.btn_stop.config(state="disabled", text="STOPPING...")
 
-    def processo_lavoro(self, percorso_radice):
-        simulazione = self.modalita_simulazione.get()
-        mod_str = "SIMULAZIONE" if simulazione else "REALE"
+    def work_process(self, root_path):
+        simulation = self.simulation_mode.get()
+        mod_str = "SIMULATION" if simulation else "REAL"
 
-        self.log(f"🚀 Avvio ESTRAZIONE PROFONDA DA PDF ({mod_str})")
-        self.log("🔍 Conteggio preventivo dei file in corso...")
+        self.log(f"🚀 Starting DEEP EXTRACTION FROM PDF ({mod_str})")
+        self.log("🔍 Preliminary file counting in progress...")
 
-        lista_pdf = list(percorso_radice.rglob("*.pdf"))
-        totale_pdf = len(lista_pdf)
+        pdf_list = list(root_path.rglob("*.pdf"))
+        total_pdfs = len(pdf_list)
 
-        if totale_pdf == 0:
-            self.log("⚠️ Nessun PDF trovato in questa cartella o sottocartelle.")
-            self.root.after(0, self.fine_processo, False)
+        if total_pdfs == 0:
+            self.log("⚠️ No PDFs found in this folder or subfolders.")
+            self.root.after(0, self.end_process, False)
             return
 
-        self.log(f"Trovati {totale_pdf} PDF pronti per l'analisi.\n")
+        self.log(f"Found {total_pdfs} PDFs ready for analysis.\n")
 
         report_log = {
-            "pdf_esaminati": 0,
-            "pdf_successi": 0,
-            "file_falliti": [],
-            "accoppiate_trovate": set()
+            "pdfs_examined": 0,
+            "pdfs_successful": 0,
+            "failed_files": [],
+            "found_pairs": set()
         }
 
-        self.finestra_tempi.clear()  # Reset all'avvio per la media mobile
+        self.time_window.clear()  # Reset at start for moving average
         start_time = time.time()
-        ultimo_aggiornamento_ui = 0  # Cronometro per l'anti-sfarfallio
-        interrotto = False
+        last_ui_update = 0  # Stopwatch for anti-flicker
+        interrupted = False
 
-        for indice, pdf in enumerate(lista_pdf, start=1):
-            # CONTROLLO DEL SEMAFORO: Se è stato premuto STOP, interrompiamo il ciclo
+        for index, pdf in enumerate(pdf_list, start=1):
+            # SEMAPHORE CHECK: If STOP was pressed, break the loop
             if self.stop_event.is_set():
-                self.log("\n🛑 ELABORAZIONE INTERROTTA DALL'UTENTE!")
-                interrotto = True
+                self.log("\n🛑 PROCESSING INTERRUPTED BY USER!")
+                interrupted = True
                 break
 
-            report_log["pdf_esaminati"] += 1
-            lotto_estratto = estrai_lotto_pdf(pdf)
+            report_log["pdfs_examined"] += 1
+            extracted_batch = extract_batch_pdf(pdf)
 
-            if lotto_estratto:
-                codice_pdf = re.split(r"[_\s-]+", pdf.stem)[0]
-                nome_base = f"{codice_pdf}_{lotto_estratto}"
-                report_log["accoppiate_trovate"].add(nome_base)
+            if extracted_batch:
+                pdf_code = re.split(r"[_\s-]+", pdf.stem)[0]
+                base_name = f"{pdf_code}_{extracted_batch}"
+                report_log["found_pairs"].add(base_name)
 
-                clean = pdf.stem.replace(lotto_estratto, "").replace(codice_pdf, "").replace("__", "_").strip("_")
-                nome_finale = f"{nome_base}_{clean}.pdf" if clean else f"{nome_base}.pdf"
+                clean = pdf.stem.replace(extracted_batch, "").replace(pdf_code, "").replace("__", "_").strip("_")
+                final_name = f"{base_name}_{clean}.pdf" if clean else f"{base_name}.pdf"
 
-                if pdf.name != nome_finale:
-                    if simulazione:
-                        report_log["pdf_successi"] += 1
-                        self.log(f"✅ [SIM] {pdf.name} -> {nome_finale}")
+                if pdf.name != final_name:
+                    if simulation:
+                        report_log["pdfs_successful"] += 1
+                        self.log(f"✅ [SIM] {pdf.name} -> {final_name}")
                     else:
                         try:
-                            pdf.rename(pdf.parent / nome_finale)
-                            report_log["pdf_successi"] += 1
-                            self.log(f"✅ [OK] {pdf.name} -> {nome_finale}")
+                            pdf.rename(pdf.parent / final_name)
+                            report_log["pdfs_successful"] += 1
+                            self.log(f"✅ [OK] {pdf.name} -> {final_name}")
                         except Exception as e:
-                            report_log["file_falliti"].append(f"{pdf.name} (Errore OS: {e})")
-                            self.log(f"❌ [ERRORE] {pdf.name}: {e}")
+                            report_log["failed_files"].append(f"{pdf.name} (OS Error: {e})")
+                            self.log(f"❌ [ERROR] {pdf.name}: {e}")
             else:
-                report_log["file_falliti"].append(f"{pdf.name} (Nessun lotto)")
+                report_log["failed_files"].append(f"{pdf.name} (No batch)")
 
             # ==========================================
-            # DASHBOARD CON THROTTLING (No Sfarfallio)
+            # DASHBOARD WITH THROTTLING (No Flicker)
             # ==========================================
-            ora_attuale = time.time()
-            self.finestra_tempi.append(ora_attuale)
+            current_time = time.time()
+            self.time_window.append(current_time)
 
-            # AGGIORNIAMO LA GUI SOLO OGNI 0.5 SECONDI (o se è l'ultimo file in assoluto)
-            if (ora_attuale - ultimo_aggiornamento_ui) > 0.5 or indice == totale_pdf:
+            # UPDATE GUI ONLY EVERY 0.5 SECONDS (or if it's the absolute last file)
+            if (current_time - last_ui_update) > 0.5 or index == total_pdfs:
 
-                # Calcoliamo la velocità basandoci solo sugli ultimi N file salvati in finestra_tempi
-                if len(self.finestra_tempi) > 1:
-                    tempo_finestra = ora_attuale - self.finestra_tempi[0]
-                    n_campioni = len(self.finestra_tempi) - 1
-                    vel_reale = n_campioni / tempo_finestra if tempo_finestra > 0 else 0
+                # Calculate speed based only on the last N files saved in time_window
+                if len(self.time_window) > 1:
+                    window_time = current_time - self.time_window[0]
+                    n_samples = len(self.time_window) - 1
+                    real_speed = n_samples / window_time if window_time > 0 else 0
                 else:
-                    # Fallback per i primissimi file
-                    elapsed_totale = ora_attuale - start_time
-                    vel_reale = indice / elapsed_totale if elapsed_totale > 0 else 0
+                    # Fallback for the very first files
+                    total_elapsed = current_time - start_time
+                    real_speed = index / total_elapsed if total_elapsed > 0 else 0
 
-                perc = (indice / totale_pdf) * 100
+                perc = (index / total_pdfs) * 100
 
-                if vel_reale > 0:
-                    eta_sec = (totale_pdf - indice) / vel_reale
+                if real_speed > 0:
+                    eta_sec = (total_pdfs - index) / real_speed
                     mins, secs = divmod(int(eta_sec), 60)
                     eta_str = f"{mins:02d}:{secs:02d}"
                 else:
                     eta_str = "--:--"
 
-                nome_troncato = (pdf.name[:25] + '..') if len(pdf.name) > 25 else pdf.name
-                status_text = f"ETA: {eta_str} | 🚀 {vel_reale:.1f} p/s | ✅ {report_log['pdf_successi']} ❌ {len(report_log['file_falliti'])} | 📄 {nome_troncato}"
+                truncated_name = (pdf.name[:25] + '..') if len(pdf.name) > 25 else pdf.name
+                status_text = f"ETA: {eta_str} | 🚀 {real_speed:.1f} p/s | ✅ {report_log['pdfs_successful']} ❌ {len(report_log['failed_files'])} | 📄 {truncated_name}"
 
                 self.update_dashboard(perc, status_text)
 
-                # Resettiamo il cronometro della GUI
-                ultimo_aggiornamento_ui = ora_attuale
+                # Reset GUI stopwatch
+                last_ui_update = current_time
 
-        # Fine ciclo (sia naturale che interrotto)
-        tempo_trascorso = time.time() - start_time
+        # End of loop (whether natural or interrupted)
+        elapsed_time = time.time() - start_time
 
-        # Scriviamo comunque il log con quello che siamo riusciti a fare fino allo stop
-        self.scrivi_log_file(percorso_radice, report_log, simulazione, tempo_trascorso, interrotto)
+        # Write log file anyway with what we managed to do until stop
+        self.write_log_file(root_path, report_log, simulation, elapsed_time, interrupted)
 
-        self.root.after(0, self.fine_processo, interrotto)
+        self.root.after(0, self.end_process, interrupted)
 
-    def scrivi_log_file(self, percorso_radice: Path, log_dati: dict, simulazione: bool, tempo_esec: float,
-                        interrotto: bool):
-        modalita = "SIMULAZIONE" if simulazione else "OPERATIVA REALE"
-        stato_finale = " (INTERROTTO INCOMPLETO)" if interrotto else ""
+    def write_log_file(self, root_path: Path, log_data: dict, simulation: bool, exec_time: float, interrupted: bool):
+        mode = "SIMULATION" if simulation else "REAL OPERATION"
+        final_state = " (INTERRUPTED INCOMPLETE)" if interrupted else ""
 
-        percorso_file = percorso_radice / f"Log_Calypso_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-        velocita = log_dati['pdf_esaminati'] / tempo_esec if tempo_esec > 0 else 0
+        file_path = root_path / f"Log_Calypso_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        speed = log_data['pdfs_examined'] / exec_time if exec_time > 0 else 0
 
-        with open(percorso_file, "w", encoding="utf-8") as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             f.write("=" * 50 + "\n")
-            f.write(f" REPORT BATTESIMO CALYPSO - MODALITÀ {modalita}{stato_finale} \n")
+            f.write(f" CALYPSO RENAMING REPORT - {mode} MODE{final_state} \n")
             f.write("=" * 50 + "\n\n")
-            f.write("--- ⏱️ TELEMETRIA DI PROCESSO ---\n")
-            f.write(f"Tempo di esecuzione: {tempo_esec:.2f} secondi\n")
-            f.write(f"Velocità media:      {velocita:.2f} PDF/secondo\n\n")
-            f.write("--- 📊 STATISTICHE GENERALI ---\n")
-            f.write(f"PDF Totali Esaminati:  {log_dati['pdf_esaminati']}\n")
-            f.write(f"PDF Gestiti/Rinominati:{log_dati['pdf_successi']}\n")
-            f.write(f"PDF Falliti/Ignorati:  {len(log_dati['file_falliti'])}\n\n")
-            f.write("--- 🏷️ CODICI E LOTTI TROVATI ---\n")
-            if not log_dati['accoppiate_trovate']:
-                f.write("Nessun lotto/codice valido identificato.\n")
+            f.write("--- ⏱️ PROCESS TELEMETRY ---\n")
+            f.write(f"Execution time: {exec_time:.2f} seconds\n")
+            f.write(f"Average speed:      {speed:.2f} PDF/second\n\n")
+            f.write("--- 📊 GENERAL STATISTICS ---\n")
+            f.write(f"Total PDFs Examined:  {log_data['pdfs_examined']}\n")
+            f.write(f"PDFs Managed/Renamed: {log_data['pdfs_successful']}\n")
+            f.write(f"PDFs Failed/Ignored:  {len(log_data['failed_files'])}\n\n")
+            f.write("--- 🏷️ CODES AND BATCHES FOUND ---\n")
+            if not log_data['found_pairs']:
+                f.write("No valid batch/code identified.\n")
             else:
-                for accoppiata in sorted(log_dati['accoppiate_trovate']):
-                    f.write(f"- {accoppiata}\n")
-            f.write("\n--- ❌ DETTAGLIO FILE NON RINOMINABILI ---\n")
-            if not log_dati['file_falliti']:
-                f.write("Perfetto! Nessun file ha generato errori o lotti mancanti.\n")
+                for pair in sorted(log_data['found_pairs']):
+                    f.write(f"- {pair}\n")
+            f.write("\n--- ❌ UNRENAMABLE FILES DETAIL ---\n")
+            if not log_data['failed_files']:
+                f.write("Perfect! No files generated errors or missing batches.\n")
             else:
-                for file in log_dati['file_falliti']:
+                for file in log_data['failed_files']:
                     f.write(f"- {file}\n")
 
-        self.log(f"\n📝 File di log salvato in: {percorso_file.name}")
-        self.log(f"⏱️ Tempo totale: {tempo_esec:.2f}s | 🚀 Velocità finale: {velocita:.2f} PDF/s")
+        self.log(f"\n📝 Log file saved to: {file_path.name}")
+        self.log(f"⏱️ Total time: {exec_time:.2f}s | 🚀 Final speed: {speed:.2f} PDF/s")
 
-    def fine_processo(self, interrotto):
-        self.btn_avvia.config(state="normal", text="▶ AVVIA PROCESSO")
-        self.btn_stop.config(state="disabled", text="⏹ FERMA")
+    def end_process(self, interrupted):
+        self.btn_start.config(state="normal", text="▶ START PROCESS")
+        self.btn_stop.config(state="disabled", text="⏹ STOP")
 
-        if interrotto:
-            self.lbl_status.config(text="Processo arrestato dall'utente.", fg="#c0392b")
-            # FIX: Aggiunto parent=self.root
-            messagebox.showinfo("Interrotto",
-                                "Elaborazione fermata in sicurezza.\nIl Log è stato salvato con i risultati parziali.", parent=self.root)
+        if interrupted:
+            self.lbl_status.config(text="Process stopped by user.", fg="#c0392b")
+            messagebox.showinfo("Interrupted",
+                                "Processing stopped safely.\nThe Log has been saved with partial results.", parent=self.root)
         else:
-            self.update_dashboard(100, "Operazione Completata con Successo!")
+            self.update_dashboard(100, "Operation Completed Successfully!")
             self.lbl_status.config(fg="#27ae60")
-            # FIX: Aggiunto parent=self.root
-            messagebox.showinfo("Fatto!", "Operazione completata!\nControlla il Log per i dettagli.", parent=self.root)
+            messagebox.showinfo("Done!", "Operation completed!\nCheck the Log for details.", parent=self.root)
 
 
 if __name__ == "__main__":
     try:
-        # ID univoco per mantenere un'icona separata sulla taskbar di Windows
+        # Unique ID to maintain a separate icon on the Windows taskbar
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Calypso.Renamer.Pro")
     except Exception:
         pass
