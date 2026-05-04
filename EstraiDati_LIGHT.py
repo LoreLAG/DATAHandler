@@ -13,11 +13,11 @@ try:
 except ImportError:
     EXCEL_AVAILABLE = False
 
-# ── COSTANTI GRAFICHE ────────────────────────────────────────────────────────
+# ── GRAPHICAL CONSTANTS ──────────────────────────────────────────────────────
 CHECKED = "☑"
 UNCHECKED = "☐"
 
-# ── REGEX MOTORE ─────────────────────────────────────────────────────────────
+# ── ENGINE REGEX ─────────────────────────────────────────────────────────────
 RE_CALYPSO = re.compile(
     r"^(.+?)[ \t]+(-?\d+[,\.]\d+)[ \t]*mm[ \t]+(-?\d+[,\.]\d+)[ \t]+(-?\d+[,\.]\d+)[ \t]+(-?\d+[,\.]\d+)[ \t]+(-?\d+[,\.]\d+)(?:[ \t]+(-?\d+[,\.]\d+))?$")
 RE_SECTION = re.compile(r"^(V\d+_F\d+)$")
@@ -33,11 +33,11 @@ def parse_number(s):
         return None
 
 
-def pulisci_testo(testo):
-    return " ".join(str(testo).split()) if testo else ""
+def clean_text(text):
+    return " ".join(str(text).split()) if text else ""
 
 
-# ── LOGICA ESTRAZIONE ────────────────────────────────────────────────────────
+# ── EXTRACTION LOGIC ────────────────────────────────────────────────────────
 def extract_single_pdf(pdf_path, has_sections=False):
     rows = []
     try:
@@ -58,22 +58,22 @@ def extract_single_pdf(pdf_path, has_sections=False):
                     if m:
                         g = m.groups()
                         tp, tm, dev = parse_number(g[3]), parse_number(g[4]), parse_number(g[5])
-                        stato = "OK" if (
+                        status = "OK" if (
                                 tm is not None and tp is not None and dev is not None and tm <= dev <= tp) else "NON OK"
-                        row = {"section": current_section, "name": pulisci_testo(g[0]), "measured": parse_number(g[1]),
-                               "nominal": parse_number(g[2]), "tp": tp, "tm": tm, "dev": dev, "stato": stato}
+                        row = {"section": current_section, "name": clean_text(g[0]), "measured": parse_number(g[1]),
+                               "nominal": parse_number(g[2]), "tp": tp, "tm": tm, "dev": dev, "stato": status}
                     else:
                         ma = RE_ANGLE.match(line)
                         if ma:
                             g = ma.groups()
-                            row = {"section": current_section, "name": pulisci_testo(g[0]),
+                            row = {"section": current_section, "name": clean_text(g[0]),
                                    "measured": parse_number(g[1]), "nominal": parse_number(g[2]), "tp": None,
                                    "tm": None, "dev": parse_number(g[3]), "stato": None}
                         else:
                             mp = RE_PARTIAL.match(line)
                             if mp:
                                 g = mp.groups()
-                                row = {"section": current_section, "name": pulisci_testo(g[0]),
+                                row = {"section": current_section, "name": clean_text(g[0]),
                                        "measured": parse_number(g[1]), "nominal": None, "tp": None, "tm": None,
                                        "dev": None, "stato": None}
 
@@ -81,11 +81,11 @@ def extract_single_pdf(pdf_path, has_sections=False):
                         seen.add((current_section, row["name"]))
                         rows.append(row)
     except Exception as e:
-        print(f"Errore file {pdf_path}: {e}")
+        print(f"File error {pdf_path}: {e}")
     return rows
 
 
-# ── INTERFACCIA ──────────────────────────────────────────────────────────────
+# ── INTERFACE ──────────────────────────────────────────────────────────────
 class CalypsoLightApp:
     def __init__(self, root):
         self.root = root
@@ -93,7 +93,7 @@ class CalypsoLightApp:
         self.root.geometry("1300x750")
         self.root.minsize(900, 600)
 
-        self.output_dir = tk.StringVar(value=str(Path.home() / "Desktop" / "Estrazioni_Calypso"))
+        self.output_dir = tk.StringVar(value=str(Path.home() / "Desktop" / "Calypso_Extractions"))
         self.use_sections = tk.BooleanVar(value=True)
 
         self.setup_ui()
@@ -106,40 +106,40 @@ class CalypsoLightApp:
         style.configure("Treeview.Heading", font=("Arial", 10, "bold"), background="#d5d8dc")
 
         # ==========================================
-        # 1. TOP BAR (Stile ConsultaDB)
+        # 1. TOP BAR (ConsultaDB Style)
         # ==========================================
         frame_top = tk.Frame(self.root, bg="#1c2833", pady=15, padx=10)
         frame_top.pack(fill="x", side="top")
 
-        tk.Label(frame_top, text="📁 Gestione Sorgenti (PDF)", bg="#1c2833", fg="white",
+        tk.Label(frame_top, text="📁 Source Management (PDF)", bg="#1c2833", fg="white",
                  font=("Arial", 14, "bold")).pack(side="left", padx=10)
 
-        self.btn_clear = tk.Button(frame_top, text="🗑 Svuota Albero", command=self.clear_list,
+        self.btn_clear = tk.Button(frame_top, text="🗑 Clear Tree", command=self.clear_list,
                                    bg="#e74c3c", fg="white", font=("Arial", 10, "bold"), bd=0, padx=10, pady=5)
         self.btn_clear.pack(side="right", padx=5)
 
-        self.btn_add_files = tk.Button(frame_top, text="📄 Aggiungi PDF Singoli", command=self.add_files,
+        self.btn_add_files = tk.Button(frame_top, text="📄 Add Single PDFs", command=self.add_files,
                                        bg="#3498db", fg="white", font=("Arial", 10, "bold"), bd=0, padx=10, pady=5)
         self.btn_add_files.pack(side="right", padx=5)
 
-        self.btn_add_folder = tk.Button(frame_top, text="📁 Aggiungi Cartella (Ricorsiva)", command=self.add_folder,
+        self.btn_add_folder = tk.Button(frame_top, text="📁 Add Folder (Recursive)", command=self.add_folder,
                                         bg="#27ae60", fg="white", font=("Arial", 10, "bold"), bd=0, padx=10, pady=5)
         self.btn_add_folder.pack(side="right", padx=5)
 
         # ==========================================
-        # 2. BODY: TREEVIEW A CASCATA
+        # 2. BODY: CASCADING TREEVIEW
         # ==========================================
         frame_body = tk.Frame(self.root, padx=20, pady=15)
         frame_body.pack(fill="both", expand=True)
 
-        # Torniamo all'impostazione nativa con "path" mostrato direttamente
+        # Reverting to native setting with "path" shown directly
         self.tree = ttk.Treeview(frame_body, columns=("count", "path"), show="tree headings")
 
-        self.tree.heading("#0", text="Esporta | Nome Cartella / File")
+        self.tree.heading("#0", text="Export | Folder / File Name")
         self.tree.heading("count", text="PDF")
-        self.tree.heading("path", text="Percorso Completo")
+        self.tree.heading("path", text="Full Path")
 
-        # Larghezze ottimizzate, percorso riallineato a sinistra ("w")
+        # Optimized widths, path realigned to the left ("w")
         self.tree.column("#0", width=280, anchor="w")
         self.tree.column("count", width=40, anchor="center")
         self.tree.column("path", width=550, anchor="w")
@@ -153,22 +153,22 @@ class CalypsoLightApp:
         self.tree.bind("<ButtonRelease-1>", self.toggle_check)
 
         # ==========================================
-        # 3. BOTTOM BAR E LOG
+        # 3. BOTTOM BAR AND LOG
         # ==========================================
         frame_bot = tk.Frame(self.root, padx=20, pady=10, bg="#ecf0f1")
         frame_bot.pack(fill="x", side="bottom")
 
-        # Sotto-sezione destinazione
+        # Output destination subsection
         frame_dest = tk.Frame(frame_bot, bg="#ecf0f1")
         frame_dest.pack(fill="x", pady=(0, 10))
 
-        tk.Label(frame_dest, text="Cartella di Destinazione Output:", font=("Arial", 10, "bold"), bg="#ecf0f1").pack(
+        tk.Label(frame_dest, text="Output Destination Folder:", font=("Arial", 10, "bold"), bg="#ecf0f1").pack(
             side="left")
         tk.Entry(frame_dest, textvariable=self.output_dir, width=70, font=("Arial", 10)).pack(side="left", padx=10)
-        tk.Button(frame_dest, text="Sfoglia...", command=self.browse_out, font=("Arial", 9)).pack(side="left")
+        tk.Button(frame_dest, text="Browse...", command=self.browse_out, font=("Arial", 9)).pack(side="left")
 
-        # Sotto-sezione Azioni
-        self.btn_run = tk.Button(frame_bot, text="🚀 AVVIA AGGREGAZIONE DATI", bg="#27ae60", fg="white",
+        # Actions subsection
+        self.btn_run = tk.Button(frame_bot, text="🚀 START DATA AGGREGATION", bg="#27ae60", fg="white",
                                  font=("Arial", 14, "bold"), height=2, bd=0, command=self.start_process)
         self.btn_run.pack(fill="x", pady=(5, 5))
 
@@ -179,9 +179,9 @@ class CalypsoLightApp:
         self.log_box = scrolledtext.ScrolledText(frame_bot, height=6, font=("Consolas", 9), bg="#1e1e1e", fg="#00ff00")
         self.log_box.pack(fill="both", expand=True)
 
-    # ── HANDLERS COSTRUZIONE ALBERO ──────────────────────────────────────────
+    # ── TREE BUILDING HANDLERS ──────────────────────────────────────────
     def build_tree_node(self, parent_id, path_obj, depth=0):
-        # Limite profondità per non appesantire l'albero visivo
+        # Depth limit to not overload the visual tree
         if depth > 2:
             return 0
 
@@ -190,7 +190,7 @@ class CalypsoLightApp:
 
         node_name = path_obj.name
 
-        # Inseriamo il nodo: nella prima colonna il nome, nell'ultima il percorso completo stringa
+        # Insert the node: first column is the name, last is the full path string
         node_id = self.tree.insert(parent_id, "end", text=f"{CHECKED}  {node_name}", values=(pdf_count, str(path_obj)))
 
         total_pdfs_in_branch = pdf_count
@@ -203,7 +203,7 @@ class CalypsoLightApp:
         except PermissionError:
             pass
 
-        # Pruning dei rami vuoti
+        # Pruning empty branches
         if total_pdfs_in_branch == 0:
             self.tree.delete(node_id)
             return 0
@@ -214,16 +214,16 @@ class CalypsoLightApp:
         return total_pdfs_in_branch
 
     def add_folder(self):
-        d = filedialog.askdirectory(parent=self.root, title="Seleziona cartella")
+        d = filedialog.askdirectory(parent=self.root, title="Select folder")
         if d:
             path_obj = Path(d)
-            self.log(f"Scansione in corso per: {path_obj.name}...")
+            self.log(f"Scanning: {path_obj.name}...")
             tot = self.build_tree_node("", path_obj, depth=0)
             if tot == 0:
-                messagebox.showwarning("Vuota", "Nessun PDF trovato nella cartella o nelle sue sottocartelle valide.",
+                messagebox.showwarning("Empty", "No PDFs found in the folder or its valid subfolders.",
                                        parent=self.root)
             else:
-                self.log(f"Aggiunta struttura ad albero ({tot} PDF totali nel ramo).")
+                self.log(f"Tree structure added ({tot} total PDFs in the branch).")
 
     def add_files(self):
         fs = filedialog.askopenfilenames(parent=self.root, filetypes=[("PDF Files", "*.pdf")])
@@ -231,9 +231,9 @@ class CalypsoLightApp:
             for f in fs:
                 path_obj = Path(f)
                 self.tree.insert("", "end", text=f"{CHECKED}  {path_obj.name}", values=(1, str(path_obj)))
-            self.log(f"Aggiunti {len(fs)} file PDF singoli.")
+            self.log(f"Added {len(fs)} individual PDF files.")
 
-    # ── LOGICA SPUNTE A CASCATA ──────────────────────────────────────────────
+    # ── CASCADING CHECK LOGIC ──────────────────────────────────────────────
     def set_node_state(self, item_id, state_char):
         current_text = self.tree.item(item_id, "text")
         base_name = current_text[1:].strip()
@@ -246,8 +246,8 @@ class CalypsoLightApp:
         item_id = self.tree.identify_row(event.y)
         if not item_id: return
 
-        elemento = self.tree.identify_element(event.x, event.y)
-        if "indicator" in elemento:
+        element = self.tree.identify_element(event.x, event.y)
+        if "indicator" in element:
             return
 
         column = self.tree.identify_column(event.x)
@@ -255,10 +255,10 @@ class CalypsoLightApp:
             bbox = self.tree.bbox(item_id, "#0")
             if not bbox: return
 
-            x_inizio_testo = bbox[0]
-            click_relativo = event.x - x_inizio_testo
+            x_text_start = bbox[0]
+            relative_click = event.x - x_text_start
 
-            if click_relativo > 25 or click_relativo < 0:
+            if relative_click > 25 or relative_click < 0:
                 return
 
             current_text = self.tree.item(item_id, "text")
@@ -269,10 +269,10 @@ class CalypsoLightApp:
 
     def clear_list(self):
         for i in self.tree.get_children(): self.tree.delete(i)
-        self.log("Lista sorgenti svuotata.")
+        self.log("Source list cleared.")
 
     def browse_out(self):
-        d = filedialog.askdirectory(parent=self.root, title="Seleziona la cartella di destinazione")
+        d = filedialog.askdirectory(parent=self.root, title="Select destination folder")
         if d: self.output_dir.set(d)
 
     def log(self, msg):
@@ -281,11 +281,11 @@ class CalypsoLightApp:
         self.log_box.see(tk.END)
         self.log_box.config(state='disabled')
 
-    # ── MOTORE DI ELABORAZIONE ───────────────────────────────────────────────
+    # ── PROCESSING ENGINE ───────────────────────────────────────────────
     def get_checked_paths(self, node):
         paths = []
         if self.tree.item(node, "text").startswith(CHECKED):
-            # values[1] contiene str(path_obj) ovvero il percorso reale
+            # values[1] contains str(path_obj) which is the real path
             paths.append(self.tree.item(node, "values")[1])
 
         for child in self.tree.get_children(node):
@@ -298,10 +298,10 @@ class CalypsoLightApp:
             selected_paths.extend(self.get_checked_paths(root_node))
 
         if not selected_paths:
-            messagebox.showwarning("Attenzione", "Nessuna cartella spuntata da elaborare.", parent=self.root)
+            messagebox.showwarning("Warning", "No checked folders to process.", parent=self.root)
             return
 
-        self.btn_run.config(state="disabled", text="ELABORAZIONE IN CORSO...")
+        self.btn_run.config(state="disabled", text="PROCESSING IN PROGRESS...")
         self.btn_add_folder.config(state="disabled")
         self.btn_add_files.config(state="disabled")
         self.btn_clear.config(state="disabled")
@@ -326,13 +326,13 @@ class CalypsoLightApp:
             total = len(pdf_tasks)
 
             if total == 0:
-                self.log("Nessun PDF valido trovato nelle selezioni.")
+                self.log("No valid PDFs found in the selections.")
                 return
 
             self.root.after(0, lambda: self.progress.configure(maximum=total, value=0))
 
             for idx, pdf_path in enumerate(pdf_tasks):
-                self.log(f"Analisi {pdf_path.name}...")
+                self.log(f"Analyzing {pdf_path.name}...")
                 results = extract_single_pdf(pdf_path, self.use_sections.get())
                 for r in results:
                     r["codice_pezzo"] = pdf_path.stem
@@ -344,14 +344,14 @@ class CalypsoLightApp:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M")
                 headers = ["codice_pezzo", "section", "name", "measured", "nominal", "tp", "tm", "dev", "stato"]
 
-                csv_file = out_path / f"Aggregato_{timestamp}.csv"
+                csv_file = out_path / f"Aggregated_{timestamp}.csv"
                 with open(csv_file, "w", newline="", encoding="utf-8-sig") as f:
                     w = csv.DictWriter(f, fieldnames=headers, delimiter=";")
                     w.writeheader()
                     w.writerows(all_data)
 
                 if EXCEL_AVAILABLE:
-                    xlsx_file = out_path / f"Aggregato_{timestamp}.xlsx"
+                    xlsx_file = out_path / f"Aggregated_{timestamp}.xlsx"
                     wb = openpyxl.Workbook()
                     ws = wb.active
                     ws.append(headers)
@@ -361,20 +361,20 @@ class CalypsoLightApp:
                         if r.get("stato") == "NON OK":
                             for cell in ws[ws.max_row]: cell.fill = red_fill
                     wb.save(xlsx_file)
-                    self.log(f"Salvataggio Excel completato: {xlsx_file.name}")
+                    self.log(f"Excel save completed: {xlsx_file.name}")
 
-                self.log(f"✅ FINITO! Estratte {len(all_data)} misure da {total} file.")
-                self.root.after(0, lambda: messagebox.showinfo("Successo",
-                                                               f"Elaborazione completata.\nFile salvati in: {out_path}",
+                self.log(f"✅ FINISHED! Extracted {len(all_data)} measures from {total} files.")
+                self.root.after(0, lambda: messagebox.showinfo("Success",
+                                                               f"Processing completed.\nFiles saved in: {out_path}",
                                                                parent=self.root))
             else:
-                self.log("⚠️ Nessun dato estratto dai file selezionati.")
+                self.log("⚠️ No data extracted from the selected files.")
 
         except Exception as e:
-            self.log(f"❌ ERRORE CRITICO: {e}")
+            self.log(f"❌ CRITICAL ERROR: {e}")
         finally:
             self.root.after(0, lambda: [
-                self.btn_run.config(state="normal", text="AVVIA ESTRAZIONE DATI"),
+                self.btn_run.config(state="normal", text="START DATA EXTRACTION"),
                 self.btn_add_folder.config(state="normal"),
                 self.btn_add_files.config(state="normal"),
                 self.btn_clear.config(state="normal"),
